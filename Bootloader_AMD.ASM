@@ -71,12 +71,6 @@ entry_64bit:
     or rax, 1 << 20             ; SMEP 
     mov cr4, rax
 
-    ; Host Save Area
-    mov ecx, 0xC0000105
-    mov eax, 0x3000
-    xor edx, edx
-    wrmsr
-
     jmp 0x4000
 
 align 8
