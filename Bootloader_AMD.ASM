@@ -89,8 +89,7 @@ gdt_end:
 
 gdt_descriptor:
     dw gdt_end - gdt_start - 1
-    dd gdt_start                 ; הכתובת ב-RAM (בגודל dd)
-
+    dd gdt_start                 
 times 510-($-$$) db 0
 dw 0xAA55
 ; Bootloader are limited for 512 bytes in Intel or AMD CPU 
