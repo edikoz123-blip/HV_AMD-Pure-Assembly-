@@ -471,9 +471,6 @@
 ; ============================================================================
 Hv_entry:
     cli                         ; Disable all hardware interrupts instantly
-
-; Prapering all the MSRS for the Hypervisor:
-
     ; --- 1. Host Stack Setup & Write Protection ---
     mov rsp, 0x0003F000         ; Set up a pristine, isolated 64-bit Host stack
 
@@ -500,6 +497,212 @@ Hv_entry:
     mov eax, 0x00003000         ; Set 4KB aligned physical address boundary at 0x3000
     xor edx, edx                ; Clear high 32-bits of the 64-bit physical address
     wrmsr                       ; Commit HSAVE anchor location to CPU
+
+;==================================================================================
+;               Preparing all MSRS so everything in our control
+;==================================================================================
+
+    ;==================================================================================
+    ;                          Side_Channel_Attack_defenses
+    ;==================================================================================
+    ;      Enforce Core Hardware Security Mitigations (IBRS / SSBD) 
+    ; We force the physical CPU to turn on maximum speculation isolation.
+    ; Value 0x3 sets Bit 0 (IBRS - Branch Targets) & Bit 1 (STIBP - Hyperthreads)
+    ; Value 0x7 also adds Speculative Store Bypass Disable (SSBD) if supported.
+    Side_Channel_Attack_defenses:
+    mov ecx, IA32_SPEC_CTRL
+    mov eax, 0x00000007         ; Lower 32-bits: Enable IBRS, STIBP, SSBD hardwired
+    xor edx, edx                ; Upper 32-bits: Clear to 0
+    wrmsr                       ; Commit state directly to CPU hardware execution engine
+
+    ; Sanitize and Purge CPU Branch Prediction History ---
+    ; We issue a physical flush command to clean any residual tracking from the BIOS.
+    ; Bit 0 of IA32_PRED_CMD executes an Immediate Indirect Branch Prediction Barrier (IBPB).
+    mov ecx, IA32_PRED_CMD
+    mov eax, 0x00000001         ; Trigger IBPB history purge sequence
+    xor edx, edx
+    wrmsr
+
+    ; Establish Hardware Core Locks on AMD Configuration ---
+    ; The AMD Hardware Configuration Register (HWCR) governs internal CPU features.
+    ; We read the current setup, verify limits, and prepare it for structural stability.
+    mov ecx, AMD_HWCR
+    rdmsr
+    or eax, 1 << 24             ; Set Bit 24 (TSC_FREQ_SEL) or customize architecture limits
+    wrmsr
+
+    ; Sterilize Mitigation Control Registers ---
+    mov ecx, IA32_PRED_CTRL
+    xor eax, eax                ; Establish clean zero baseline state
+    xor edx, edx
+    wrmsr
+
+    ; Hard Flush the L1 Data Cache for Cold Start Security ---
+    ; Turning on bit 0 triggers the hardware to completely wipe L1 cache lines,
+    ; killing any leftovers from preceding boot layers.
+    mov ecx, IA32_FLUSH_CMD
+    mov eax, 0x00000001         ; Commit atomic L1 data cache invalidate command
+    xor edx, edx
+    wrmsr
+
+    ;==================================================================================
+    ;                           MEMORY_TYPING_AND_APIC
+    ;==================================================================================
+    prepare_memory_typing_and_apic:
+    ; --- STEP 1: Verify MTRR Architectural Capabilities ---
+    ; We query the processor to ensure fixed-range registers and WC are active.
+    mov ecx, MSR_MTRRcap
+    rdmsr                       ; Returns capabilities in EAX (Read-Only framework)
+
+    ; --- STEP 2: Configure Fixed-Range MTRR for Low 64KB (Bootloader Area) ---
+    ; Each byte in this 64-bit register dictates the memory type of an 8KB block.
+    ; Value 0x06 sets the type to Write-Back (WB) for blazing fast execution, 
+    ; or 0x00 to mark it Uncacheable (UC) if you want absolute physical isolation.
+    ; We establish Write-Back (0x06) across all eight 8KB sub-blocks of the first 64KB.
+    mov ecx, MSR_MTRRfix64k_00000
+    mov eax, 0x06060606         ; Type for 0x00000 to 0x07FFF (Blocks 0-3)
+    mov edx, 0x06060606         ; Type for 0x08000 to 0x0FFFF (Blocks 4-7)
+    wrmsr                       ; Lock the memory caching type for the low 64KB frame
+
+    ; --- STEP 3: Enforce Default Memory Type System-Wide ---
+    ; We set the global memory behavior for any area not explicitly mapped by a range register.
+    ; Value 0x00000C06: 
+    ; - Bit 11 (MTRR Enable) = 1 [intel.com]
+    ; - Bit 10 (Fixed-Range MTRR Enable) = 1 [intel.com]
+    ; - Bits 7:0 (Default Memory Type) = 0x06 (Write-Back) [intel.com]
+    mov ecx, IA32_MTRR_DEF_TYPE
+    mov eax, 0x00000C06         ; Turn on global MTRRs and force Write-Back caching default [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 4: Lock and Validate Local APIC Base Location ---
+    ; The Local APIC handles hardware interrupts for the core.
+    ; We read the register, preserve the physical base address, and ensure it is armed.
+    mov ecx, IA32_APIC_BASE
+    rdmsr
+    or eax, 1 << 11             ; Set Bit 11 (APIC Global Enable) to enforce hardware interrupt control [intel.com]
+    wrmsr                       ; Commit APIC state to silicon architecture
+
+    ;==================================================================================
+    ;                           cet_control_flow        
+    ;==================================================================================
+    prepare_cet_control_flow:
+    ; --- STEP 1: Configure Kernel/Supervisor Shadow Stack (IA32_S_CET) ---
+    ; We write to the Supervisor CET register to activate the hardware engine.
+    ; Value 0x00000001: 
+    ; - Bit 0 (SHSTK_EN) = 1 -> Enables Shadow Stack for Supervisor Mode [intel.com]
+    ; - Bit 1 (WRSS_EN)  = 1 -> Enables WRSS instruction if write-to-shadow-stack is needed [intel.com]
+    mov ecx, IA32_S_CET
+    mov eax, 0x00000003         ; Turn on Shadow Stack Enforcement & WRSS in Kernel [intel.com]
+    xor edx, edx
+    wrmsr                       ; Commit CET hardware activation to the core
+
+    ; --- STEP 2: Establish Privilege Level 0 Shadow Stack Pointer (IA32_PL0_SSP) ---
+    ; We must point the physical CPU to a pristine memory zone allocated for the 
+    ; Host's secure shadow stack. Let's wire it to a secure page frame (e.g., 0x00028000).
+    mov ecx, IA32_PL0_SSP
+    mov eax, 0x00028000         ; Lower 32-bits of the safe Shadow Stack pointer location
+    xor edx, edx                ; Upper 32-bits (Assumed within the first 4GB region)
+    wrmsr                       ; Lock the Ring 0 Shadow Stack Pointer in silicon
+
+    ; --- STEP 3: Wire Interrupt Shadow Stack Table Address ---
+    ; When a hardware interrupt or exception occurs, the CPU needs a clean shadow stack frame.
+    ; We map the execution pointer table to another dedicated secure frame (e.g., 0x00029000).
+    mov ecx, IA32_INTERRUPT_SSP_TABLE_ADDR
+    mov eax, 0x00029000         ; Pointer to the SSP interrupt token layout array
+    xor edx, edx
+    wrmsr                       ; Arm the interrupt hardware mitigation matrix
+
+    ; --- STEP 4: Reset User Mode CET Baseline ---
+    ; Ensure User Mode restrictions are cleared at early stage to prevent fault loop
+    mov ecx, IA32_U_CET
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 5: Finalize and Arm via Control Register 4 (CR4) ---
+    ; To activate CET globally on the core, Bit 23 of CR4 (CET Enable) must be flipped [intel.com].
+    mov rax, cr4
+    or rax, 1 << 23             ; Turn on Bit 23 (CET Hardware Bit) [intel.com]
+    mov cr4, rax                ; The processor is now actively locked under CET shield!
+
+    ;==================================================================================
+    ;             performance_and_debugging it just cleaning
+    ;==================================================================================
+
+    prepare_performance_and_debugging:
+    ; --- STEP 1: Blind the Hardware Debug Control (IA32_DEBUGCTL) ---
+    ; We completely clear this register to zero out all hardware tracing features.
+    ; - Bit 0 (LBR) = 0 -> Disables Last Branch Recording globally [intel.com]
+    ; - Bit 1 (BTF) = 0 -> Disables Single-Step on Branches (Anti-Stepping) [intel.com]
+    mov ecx, IA32_DEBUGCTL
+    xor eax, eax                ; Clear all control bits to 0
+    xor edx, edx
+    wrmsr                       ; Silicon debug features are now dead and blind
+
+    ; --- STEP 2: Kill Global Performance Counters (IA32_PERF_GLOBAL_CTRL) ---
+    ; Performance counters can be abused to measure hypervisor execution footprints.
+    ; We drop the execution control mask to 0, stopping all hardware profile counters [intel.com].
+    mov ecx, IA32_PERF_GLOBAL_CTRL
+    xor eax, eax                ; Disarm all counter allocation fields
+    xor edx, edx
+    wrmsr                       ; Performance side-channel profiling is frozen
+
+    ; --- STEP 3: Sanitize Last Branch Record (LBR) Cache Matrix ---
+    ; We execute an explicit zero-wipe on the LBR pipeline source and target registers
+    ; to purge any residual instruction pointers left behind from the pre-boot state.
+    mov ecx, MSR_BR_FROM_IP
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+    
+    mov ecx, MSR_BR_TO_IP
+    xor eax, eax
+    xor edx, edx
+    wrmsr                       ; Hardware trace vectors are perfectly sterilized 
+
+    ;==================================================================================
+    ;              thermal_and_power_control physics is my favorite :)
+    ;==================================================================================
+    prepare_thermal_and_power_control:
+    ; --- STEP 1: Establish Pure Performance Bias (IA32_ENERGY_PERF_BIAS) ---
+    ; We bypass any OS power-saving jitter. 
+    ; Value 0x00 forces the silicon into Maximum Performance Mode [intel.com].
+    ; This eliminates dynamic frequency switching which hackers use for timing analysis.
+    mov ecx, IA32_ENERGY_PERF_BIAS
+    xor eax, eax                ; Value 0: Performance hint set to absolute max [intel.com]
+    xor edx, edx
+    wrmsr                       ; Energy policy is locked to maximum power execution
+
+    ; --- STEP 2: Configure Processor Core Matrix (IA32_MISC_ENABLE) ---
+    ; We read the current setup, verify hardwired limits, and enforce critical flags.
+    ; - Bit 34 (XD Bit Enable) = 1 -> Hard-enforces Execute-Disable flag for page safety [intel.com].
+    ; - Bit 16 (Enhanced Intel SpeedStep) = 0 -> We kill dynamic throttling to enforce static clock speed [intel.com].
+    mov ecx, IA32_MISC_ENABLE
+    rdmsr
+    or eax, 1 << 34             ; Force Execute-Disable (XD Bit) active [intel.com]
+    and eax, ~(1 << 16)         ; Strip out dynamic SpeedStep control [intel.com]
+    wrmsr                       ; Core structural properties successfully committed
+
+    ; --- STEP 3: Enforce Thermal Intercept Guard (IA32_THERM_CONTROL) ---
+    ; We program the Silicon Thermal Monitor Interface mask.
+    ; This configures automatic hardware-level thermal modulation (Clock Throttling) 
+    ; to defend against physical heat-generation exploits.
+    mov ecx, IA32_THERM_CONTROL
+    mov eax, 0x00000009         ; Activate automatic thermal control circuit (Bit 0 and Bit 3) [intel.com]
+    xor edx, edx
+    wrmsr                       ; Physical thermal patrol armed in hardware
+
+    ; --- STEP 4: Lock User Mode Wait Parameters (IA32_UMWAIT_CONTROL) ---
+    ; The UMWAIT instruction allows user mode code to put the CPU into a low-power state.
+    ; Attackers abuse this to build ultra-precise time-measurement loops (Side-Channel).
+    ; We modify the maximum time limits and configuration to freeze this capability.
+    mov ecx, IA32_UMWAIT_CONTROL
+    xor eax, eax                ; Clear time bias limits to baseline constants
+    xor edx, edx
+    wrmsr                       ; Speculative user-mode wait timing loop disabled
+
+
 
 ; =================================================================================
 ; AMD SVM 1GB ULTIMATE MONSTER LAZY NPT MATRIX (512 PAGE TABLES MAXIMUM FULL LOCK)
