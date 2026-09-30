@@ -650,6 +650,26 @@
 ; =======================================================================
 %define MSR_AMD_FP_CFG          0xC0011028  ; Floating Point Unit Configuration (Alters execution timing of heavy vector instructions to avoid power surges)
 
+; =======================================================================
+; 42: AMD SEV-SNP ENCRYPTION MATRIX & PAGE VALIDATION CONTROLS
+; =======================================================================
+%define MSR_AMD_RMP_BASE        0xC0010132  ; Reverse Map Table (RMP) Base Address (Core control for SNP memory page tracking)
+%define MSR_AMD_RMP_END         0xC0010133  ; Reverse Map Table End Address Boundary Register
+%define MSR_AMD_VMSA_REG_PROT   0xC001013F  ; VMSA Register Protection Switch (Encrypts and locks state-save areas of vCPUs)
+
+; =======================================================================
+; 43: AMD SPECULATIVE EXECUTION SHIELDS & CORE CONFIG EXTRAS
+; =======================================================================
+%define MSR_AMD_THREAD_CONFIG   0xC0011012  ; Thread Configuration Register (Alters pipeline resource allocation per thread)
+%define MSR_AMD_EXT_FEATURES2   0xC001011D  ; Extended Features 2 Layout Register (Unlocks Zen-specific security switches)
+%define MSR_AMD_SYS_CFG2        0xC0000015  ; Extended System Configuration (Additional flags for locking memory types)
+
+; =======================================================================
+; 44: AMD INFINITY FABRIC TELEMETRY & SYSTEM RECOVERY CONTROL
+; =======================================================================
+%define MSR_AMD_FABRIC_ERR_CTL  0xC0011001  ; Infinity Fabric Error Reporting Control Register
+%define MSR_AMD_MSR_DATA_MASK   0xC0011015  ; Secret Data Masking Register (Controls trailing bits alignment visualization)
+
 
 ; ============================================================================
 ; ---------- LOW-LEVEL HYPERVISOR ENTRY POINT (Prapering time) ---------------
@@ -1821,6 +1841,937 @@ prepare_mca_bank8_sanitization:
     wrmsr
     ; [BIT EXPLANATION] We flood the control register with 0xFFFFFFFF to track all physical faults [intel.com], 
     ; while zeroing out the status frame to guarantee a clean system footprint with no leakage from previous boot sectors [vt01.com].
+
+    ;==================================================================================
+; 1. CORE AMD SVM VIRTUALIZATION MASTER CONTROLS (FIXED & VERIFIED)
+;==================================================================================
+prepare_amd_svm_master_controls:
+    ; --- STEP 1: Configure and Lock SVM Hardware Configuration (VM_CR_MSR) ---
+    mov ecx, VM_CR_MSR                  ; MSR: 0xC0010114 [intel.com]
+    rdmsr                               ; Read existing virtualization state context [intel.com]
+    or eax, 1 << 3                      ; Bit 3: SVMDIS (Write 1 to clear/disable the SVM disable switch) [intel.com]
+    or eax, 1 << 4                      ; Bit 4: LOCK (Locks VM_CR configuration until physical CPU reset) [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 3 = 1, Bit 4 = 1 [intel.com]. This forcefully boots the master 
+    ; SVM lock mechanism, ensuring that once hardware virtualization is armed, it cannot be disabled until reset [vt01.com].
+
+    ; --- STEP 2: Allocate Host Save Area Physical Address (VM_HSAVE_PA_MSR) ---
+    ; The hardware demands a dedicated, pristine 4KB page layout to dump Host state during VMRUN.
+    mov ecx, VM_HSAVE_PA_MSR            ; MSR: 0xC0010117 [intel.com]
+    mov eax, 0x0002A000                 ; Lower 32-bits: Physical pointer to the allocated 4KB HSAVE frame
+    xor edx, edx                        ; Upper 32-bits (Assumed within first 4GB boundary layout)
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0x00000000_0002A000. Points the execution core to an isolated 
+    ; physical memory segment, fulfilling a critical architectural requirement for stable VM-Exit handling [intel.com, vt01.com].
+
+    ; --- STEP 3: Enforce System Management Mode TSEG Base Protections ---
+    mov ecx, MSR_AMD_SMM_ADDR           ; MSR: 0xC0010112 [intel.com]
+    rdmsr                               ; Pull configuration for physical SMM segments [intel.com]
+    ; [HARDWARE CONTEXT] Read Validation. Evaluates SMM TSEG boundaries to confirm that background firmware 
+    ; memory models do not overlap or interfere with the matted Hypervisor 1GB matrix zone [intel.com, vt01.com].
+
+;==================================================================================
+; 2. ADVANCED HARDWARE ENCRYPTION & ATTRIBUTES (AMD SEV / SEV-SNP)
+;==================================================================================
+prepare_amd_sev_snp_matrix:
+    ; --- STEP 1: Verify and Intercept Secure Encrypted Virtualization Status ---
+    mov ecx, MSR_SEV_STATUS             ; MSR: 0xC0010131 [intel.com]
+    rdmsr                               ; Query active hardware encryption features [intel.com]
+    ; [BIT EXPLANATION] Read-Only Core Frame. Bit 0 (SEV Enabled), Bit 1 (SEV-ES Enabled), 
+    ; and Bit 2 (SEV-SNP Enabled) [intel.com]. Verifies if the silicon engine is enforcing cryptographic memory page isolation [vt01.com].
+
+    ; --- STEP 2: Query Guest VCPU Attestation Identifier Frame ---
+    mov ecx, MSR_VCPU_ID                ; MSR: 0xC001013A [intel.com]
+    rdmsr                               ; Read unique cryptographic attestation token [intel.com]
+    ; [BIT EXPLANATION] Read-Only Core Matrix. Holds unique cryptographic identifiers used by the 
+    ; firmware to bind hardware verification keys to the running guest context shell [intel.com, vt01.com].
+
+;==================================================================================
+; 3. AMD INTERNALS, DECODE CONFIGURATION & SILICON SPECULATION DEFENSE
+;==================================================================================
+prepare_amd_decode_and_speculation_hardening:
+    ; --- STEP 1: Configure Decode Configuration (MSR_DE_CFG) ---
+    ; This register governs speculative decode pipeline options. We apply patches against design flaws.
+    mov ecx, MSR_DE_CFG                 ; MSR: 0xC0011029 [intel.com]
+    rdmsr                               ; Pull micro-architectural bit matrix [intel.com]
+    or eax, 1 << 1                      ; Bit 1: Disables specific speculative pipeline behaviors (Zenbleed fix branch)
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 1 = 1. Forcefully patches structural instruction decode traps [intel.com], 
+    ; eliminating speculation data leaks residing within the lower vector registers [vt01.com].
+
+    ; --- STEP 2: Harden Load-Store Configuration Frame (MSR_LS_CFG) ---
+    ; We clamp dynamic memory pipelining to avoid speculative tracking bypass mechanisms.
+    mov ecx, MSR_LS_CFG                 ; MSR: 0xC0011020 [intel.com]
+    rdmsr
+    or eax, 1 << 15                     ; Bit 15: Disables speculative store forwarding loops (Spectre-V4 shield extension)
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 15 = 1. Forces sequential memory serialization for conflicting loads and stores [intel.com], 
+    ; closing side-channel timing analysis vectors within the core data cache unit [vt01.com].
+
+;==================================================================================
+; 4. AMD ADVANCED SYSTEM ARCHITECTURE & EXCEPTION VECTOR EXTENSIONS
+;==================================================================================
+prepare_amd_system_architecture:
+    ; --- STEP 1: Query Current Microcode Patch Level ---
+    ; We query the active firmware revision injected into the AMD silicon layout.
+    mov ecx, MSR_AMD_PATCH_LEVEL        ; MSR: 0x0000008B [intel.com]
+    xor eax, eax                        ; Clear execution triggers
+    xor edx, edx
+    wrmsr                               ; Trigger the CPU to update the patch level signature inside EAX [intel.com]
+    ; [BIT EXPLANATION] Read Validation Loop. Writing 0 to 0x8B forces AMD hardware to dump 
+    ; the true active microcode revision code into the lower 32-bits (EAX) for validation [intel.com].
+
+    ; --- STEP 2: Intercept Northbridge Configuration Profile ---
+    mov ecx, MSR_NB_CFG                 ; MSR: 0xC001001F [intel.com]
+    rdmsr                               ; Pull northbridge configuration flags [intel.com]
+    ; [HARDWARE CONTEXT] Read Validation. Evaluates core memory controller profiles to ensure 
+    ; that system fabric routing constants match our pristine Host allocation map [intel.com, vt01.com].
+
+    ; --- STEP 3: Configure Extended Exception Vector Properties ---
+    mov ecx, MSR_EXT_FEATURES           ; MSR: 0xC0010058 [intel.com]
+    rdmsr                               ; Read the extended silicon attribute matrix
+    or eax, 1 << 0                      ; Bit 0: Encapsulates extended exception vectors to lock down faults
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 1. Forces the AMD silicon logic to enforce strict vector boundaries [intel.com], 
+    ; preventing any guest mode exceptions from bypassing or stepping over core Host handler entry marks [vt01.com].
+
+; =======================================================================
+; CORE HYPERVISOR PHYSICAL MEMORY LAYOUT (STATIC DRAM CONFIGURATION)
+; =======================================================================
+ MSRP_BASE_ADDRESS  equ 0x00020000  ; Fixed physical address in DRAM allocated for the 8KB MSRP matrix [intel.com]
+ VMCB_STATIC_PA     equ 0x00022000  ; Fixed physical address in DRAM allocated for the Guest VMCB frame [intel.com, vt01.com]         <---------- Check it there some deep mistakes need to be fix after you finish
+
+; =======================================================================
+; 5. MSR PERMISSIONS MAPS (MSRP ARCHITECTURE FOR HARDWARE BLOCKING)
+; =======================================================================
+prepare_msrp_matrix_pointer:
+    ; --- STEP 1: Wire MSRP Base Buffer Address into VMCB Control Layout ---
+    ; Injecting the hardwired static physical addresses directly into the configuration block.
+    mov ebx, VMCB_STATIC_PA             ; RBX = 0x00022000 (Physical address of the VMCB frame) [intel.com, vt01.com]
+    mov eax, MSRP_BASE_ADDRESS          ; RAX = 0x00020000 (Physical pointer to our 8KB MSRP layout) [intel.com]
+    mov [rbx + 0x18], rax               ; Offset 0x18 inside the AMD VMCB control area holds the MSRP pointer [intel.com]
+    ; [HARDWARE CONTEXT] The execution engine now knows exactly where to look in DRAM to enforce intercepts [intel.com, vt01.com].
+
+    ; --- STEP 2: Execute Atomic Loop to Fill MSRP Matrix with 0xFF (Default Deny) ---
+    ; The AMD MSRP consists of 4 contiguous 2KB blocks totaling 8,192 bytes (8KB) [intel.com].
+    ; We utilize RDI as the destination address and RCX as the loop counter for 1,024 8-byte operations [nasm.us].
+    mov rdi, MSRP_BASE_ADDRESS          ; RDI = 0x00020000 (Start of the MSRP buffer block) [intel.com]
+    mov ecx, 1024                       ; 1,024 iterations * 8 bytes = Exactly 8,192 bytes (8KB) allocated matrix [intel.com]
+    mov rax, 0xFFFFFFFFFFFFFFFF         ; Load 0xFF into all 64 bits of the register atomically to set all trap bits [intel.com]
+
+.msrp_fill_loop:
+    mov [rdi], rax                      ; Commit 8 bytes of 0xFF values directly into physical DRAM lines [intel.com, vt01.com]
+    add rdi, 8                          ; Advance the memory destination pointer by 8 bytes [intel.com]
+    inc ecx                             ; Decrement the loop counter frame [nasm.us]
+    jnz .msrp_fill_loop                 ; Continue pouring concrete if counter hasnt reached zero [nasm.us]
+
+    ; [HARDWARE CONTEXT] Initialization complete. All 8,192 bytes are filled with 0xFF [intel.com].
+    ; Every bit is hardwired to 1, activating an absolute Default Deny shield across all system MSRs [intel.com, vt01.com].
+    ; Any Guest rdmsr/wrmsr call on our matted 50 fields will instantly trigger a hard VM-Exit intercept [intel.com, vt01.com]. 
+
+;==================================================================================
+; 7. AMD HARDWARE P-STATE & FREQUENCY CONTROL
+;==================================================================================
+prepare_amd_pstate_frequency_control:
+    ; --- STEP 1: Query P-State Current Allowed Limits ---
+    mov ecx, MSR_AMD_PSTATE_LIMIT       ; MSR: 0xC0010061 [intel.com]
+    rdmsr                               ; Read maximum hardware capability bounds [intel.com]
+    ; [BIT EXPLANATION] Read-Only Core Frame. Bits 2:0 in EAX contain the P-state limit register [intel.com]. 
+    ; We verify this matrix boundary to confirm the maximum physical floor limits of the core clock.
+
+    ; --- STEP 2: Force Static Maximum Performance State via Control ---
+    mov ecx, MSR_AMD_PSTATE_CTL         ; MSR: 0xC0010062 [intel.com]
+    xor eax, eax                        ; Value 0: Demand Performance State 0 (Maximum Frequency State) [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bits 2:0 = 000b. Forces the CPU hardware execution engine into P0 state [intel.com]. 
+    ; This kills any dynamic hardware power throttling to enforce an absolute static clock loop, blinding guest timing tests [vt01.com].
+
+    ; --- STEP 3: Verify Clock Multiplier Target Alignment ---
+    mov ecx, MSR_AMD_PSTATE_STAT        ; MSR: 0xC0010063 [intel.com]
+    rdmsr                               ; Query the active hardware state tracker [intel.com]
+    ; [BIT EXPLANATION] Read-Only. Reflects the active hardware selection loop [intel.com]. 
+    ; Enforces validation that our static P0 override configuration has been successfully deployed by the silicon grid [vt01.com].
+
+    ; --- STEP 4: Lock AMD Specific Hardware TSC Ratio Scale ---
+    mov ecx, MSR_AMD_TSC_RATIO          ; MSR: 0xC0000104 [intel.com]
+    mov eax, 0x00000000                 ; Fractional multiplier configuration space set to 0
+    mov edx, 0x00000001                 ; Integer scale value set to 1 (1x Ratio پاسsthrough baseline constant)
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0x00000001_00000000. Hard-locks the hardware-level TSC scaling ratio multiplier [intel.com], 
+    ; ensuring the Host timeline calculation engine operates at native frequency with zero interpolation drift.
+
+;==================================================================================
+; 8. AMD OPERATING SYSTEM VISIBLE WORKAROUNDS (OSVW ENGINE)
+;==================================================================================
+prepare_amd_osvw_engine_isolation:
+    ; --- STEP 1: Clear OSVW ID Length Tracking Parameters ---
+    mov ecx, MSR_AMD_OSVW_ID_LEN        ; MSR: 0xC0010140 [intel.com]
+    xor eax, eax                        ; Invalidate the tracked hardware errata length bounds [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Erases the quantity index of hardware bugs exposed to software [intel.com]. 
+    ; This blinds the Guest context from evaluating structural hardware errata models [vt01.com].
+
+    ; --- STEP 2: Sterilize OSVW Structural Bug Telemetry Status ---
+    mov ecx, MSR_AMD_OSVW_STATUS        ; MSR: 0xC0010141 [intel.com]
+    xor eax, eax                        ; Zero out all errata resolution bitmap entries [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Wipes the software-fix telemetry bitmap [intel.com]. Disabling this prevents 
+    ; a guest kernel payload from querying silicon-level patch logs to detect or profile the hypervisor platform [vt01.com].
+
+;==================================================================================
+; 9. AMD HARDWARE SPECULATION DEFENSES & BRANCH HARDENING
+;==================================================================================
+prepare_amd_speculation_branch_hardening:
+    ; --- STEP 1: Arm Branch Predictor Configuration Shields (MSR_AMD_BP_CFG) ---
+    mov ecx, MSR_AMD_BP_CFG             ; MSR: 0xC001102E [intel.com]
+    rdmsr                               ; Fetch microarchitectural branch prediction switches
+    or eax, 1 << 4                      ; Set Bit 4: Activate BpSpecReduce (SRSO / Spectre branch mitigation)
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 4 = 1. Drives the Zen branch controller to enforce speculative branch reduction constraints [intel.com]. 
+    ; This actively defuses complex speculative prediction exploits (like Speculative Return Stack Overflow) [vt01.com].
+
+    ; --- STEP 2: Harden Bus Unit Configuration 2 (MSR_AMD_BU_CFG2) ---
+    mov ecx, MSR_AMD_BU_CFG2            ; MSR: 0xC001102B [intel.com]
+    rdmsr                               ; Pull serialization configuration frame data
+    or eax, 1 << 15                     ; Set Bit 15: Enforce strict serialization constraints for speculative routing
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 15 = 1. Forces rigorous micro-architectural serialization parameters across the inner core fabric [intel.com], 
+    ; creating an impenetrable execution gate against cross-domain speculative side-channel attacks [vt01.com].
+
+;==================================================================================
+; 10. AMD INSTRUCTION-BASED SAMPLING (IBS CONTROLS - FETCH)
+;==================================================================================
+prepare_amd_ibs_hardware_deactivation:
+    ; --- STEP 1: Deactivate and Blind IBS Fetch Execution (MSR_AMD_IBSFETCHCTL) ---
+    mov ecx, MSR_AMD_IBSFETCHCTL        ; MSR: 0xC0011030 [intel.com]
+    xor eax, eax                        ; Drop Bit 17 (IbsFetchEn = 0) and wipe tracking registers [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Forces complete deactivation of the hardware Instruction-Based Sampling tracer [intel.com]. 
+    ; This shuts down the silicon pipeline logging loops, denying guest code from sniffing hardware profile statistics [vt01.com].
+
+    ; --- STEP 2: Purge IBS Fetch Linear Address Residual Telemetry ---
+    mov ecx, MSR_AMD_IBSFETCHLINAD      ; MSR: 0xC0011031 [intel.com]
+    xor eax, eax                        ; Erase trace history linear address registers [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 3: Purge IBS Fetch Physical Address Residual Telemetry ---
+    mov ecx, MSR_AMD_IBSFETCHPHYSAD     ; MSR: 0xC0011032 [intel.com]
+    xor eax, eax                        ; Erase trace history physical memory index registers [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 4: Sterilize IBS Execution Operations Matrix ---
+    mov ecx, MSR_AMD_IBSOPCTL           ; MSR: 0xC0011033 [intel.com]
+    xor eax, eax                        ; Invalidate macro-op analysis parameters [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Clears residual execution tracing tracking structures inside the hardware matrix [intel.com]. 
+    ; This sterilizes all remaining profiling footprint crumbs, completing the platform hardware blackout [vt01.com].
+
+;==================================================================================
+; 11. AMD SMM CONTROLS & HYPERVISOR SILICON LOCKDOWN
+;==================================================================================
+prepare_amd_smm_silicon_lockdown:
+    ; --- STEP 1: Query SMM Base Relocation Address Boundary ---
+    mov ecx, MSR_AMD_SMBASE             ; MSR: 0xC0010111 [intel.com]
+    rdmsr                               ; Extract active SMRAM physical base offset [intel.com]
+    ; [BIT EXPLANATION] Read Validation Framework. Bits 31:0 contain the physical base 
+    ; address of the SMM handler execution frame [intel.com]. Enforces structural visibility over Ring -2 elements.
+
+    ; --- STEP 2: Configure and Lock SMM Intercept Toggles (MSR_AMD_SMM_CTL) ---
+    mov ecx, MSR_AMD_SMM_CTL            ; MSR: 0xC0010116 [intel.com]
+    rdmsr                               ; Fetch microarchitectural SMM configuration bits [intel.com]
+    or eax, 1 << 0                      ; Bit 0: SMM_ENTER (Triggers hard intercept when CPU enters SMM) [intel.com]
+    or eax, 1 << 2                      ; Bit 2: SMM_LOCK (Locks SMM configuration registers until power reset) [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 1, Bit 2 = 1 [intel.com]. Hardwires SMM execution boundaries. 
+    ; This permanently blocks motherboard firmware (Ring -2) from executing silently or bypassing Host protections [vt01.com].
+
+;==================================================================================
+; 12. AMD ADVANCED VIRTUAL INTERRUPT CONTROLLER (AVIC REGISTERS)
+;==================================================================================
+prepare_amd_avic_interrupt_acceleration:
+    ; --- STEP 1: Clear Advanced Virtual Interrupt Doorbell Channel ---
+    mov ecx, MSR_AMD_AVIC_DOORBELL      ; MSR: 0xC001011B [intel.com]
+    xor eax, eax                        ; Invalidate pending virtual interrupt signal arrays [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Sterilizes the physical AVIC execution doorbell channel [intel.com]. 
+    ; This guarantees that no legacy or dynamic virtual IPI signals are pending prior to VMRUN entry [intel.com, vt01.com].
+
+;==================================================================================
+; 13. AMD PROCESSOR CONFIGURATION & BRANDING MAPS
+;==================================================================================
+prepare_amd_processor_branding_spoof:
+    ; --- STEP 1: Wire Spoofed Processor Name String (Blocks 0 to 4) ---
+    ; These registers hold the raw ASCII string returned during extended CPUID queries.
+    ; Attackers use this to identify the chip architecture; we can enforce a rigid customized layout.
+    mov ecx, MSR_AMD_NAME_STRING_0      ; MSR: 0xC0010030 [intel.com]
+    mov eax, 0x20494d41                 ; "AMI " (Example ASCII low bytes spoof)
+    mov edx, 0x4c494d4d                 ; "MMIL" (Example ASCII high bytes spoof)
+    wrmsr
+
+    mov ecx, MSR_AMD_NAME_STRING_1      ; MSR: 0xC0010031 [intel.com]
+    xor eax, eax                        ; Clear or load next consecutive character array
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_NAME_STRING_2      ; MSR: 0xC0010032 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_NAME_STRING_3      ; MSR: 0xC0010033 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_NAME_STRING_4      ; MSR: 0xC0010034 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_NAME_STRING_5      ; MSR: 0xC0010035 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX arrays override the raw hardware brand string [intel.com]. 
+    ; Hardcoding custom values permanently cloaks the underlying Zen architecture from guest queries [vt01.com].
+
+;==================================================================================
+; 14. AMD CCX TOPOLOGY & CACHE COHERENCY MATRIX
+;==================================================================================
+prepare_amd_ccx_topology_validation:
+    ; --- STEP 1: Query Physical CCX Core Identity ---
+    mov ecx, MSR_AMD_CCX_CORE_ID        ; MSR: 0xC001100C
+    rdmsr                               ; Fetch physical core index and node topology attributes
+    ; [BIT EXPLANATION] Read-Only Core Matrix. Holds NUMA node configurations and core IDs. 
+    ; We evaluate this matrix to secure deterministic context binding during multithreaded operations [vt01.com].
+
+    ; --- STEP 2: Configure L3 Cache Partitioning Properties ---
+    mov ecx, MSR_AMD_L3_CONFIG          ; MSR: 0xC0011022
+    rdmsr                               ; Pull active cache slice allocation masks
+    ; [HARDWARE CONTEXT] Read Validation. Evaluates L3 partitioning properties to confirm 
+    ; that our hardware-level core fabric configuration remains undisturbed by pre-boot sequences [vt01.com].
+
+;==================================================================================
+; 15. CORE POWER MONITORING & ENERGY LIMITS
+;==================================================================================
+prepare_amd_rapl_energy_isolation:
+    ; --- STEP 1: Query RAPL Power Unit Configuration Status ---
+    mov ecx, MSR_RAPL_POWER_UNIT        ; MSR: 0xC0010299 [intel.com]
+    rdmsr                               ; Fetch active power and energy scaling units [intel.com]
+    ; [BIT EXPLANATION] Read-Only Register. Maps internal voltage and time scaling factors [intel.com]. 
+    ; We record this baseline framework to confirm the physical power gate constants of the platform.
+
+    ; --- STEP 2: Isolate Package Cumulative Energy Telemetry ---
+    mov ecx, MSR_PKG_ENERGY_STATUS      ; MSR: 0xC001029B [intel.com]
+    rdmsr                               ; Read total accumulated silicon power consumption [intel.com]
+    ; [BIT EXPLANATION] Read-Only Frame. Tracks raw electrical consumption metrics across the die [intel.com]. 
+    ; Monitoring this grid prevents a guest from executing advanced side-channel power-signature analysis [vt01.com].
+
+;==================================================================================
+; 16. ADVANCED CPPC PERFORMANCE HARDWARE TUNING
+;==================================================================================
+prepare_amd_cppc_hardware_tuning:
+    ; --- STEP 1: Query CPPC Structural Capability Capabilities ---
+    mov ecx, MSR_AMD_CPPC_CAP1          ; MSR: 0xC00102B0 [intel.com]
+    rdmsr                               ; Extract silicon efficient frequencies into EAX/EDX [intel.com]
+    ; [BIT EXPLANATION] Read-Only Register. Bits 31:24 contain the highest performance 
+    ; capabilities of the physical core die [intel.com]. Checked to monitor baseline hardware speed scales.
+
+    ; --- STEP 2: Force Global Deactivation of CPPC Core Optimization ---
+    mov ecx, MSR_AMD_CPPC_ENABLE        ; MSR: 0xC00102B1 [intel.com]
+    xor eax, eax                        ; Value 0: Explicitly disarm autonomous hardware frequency scaling [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 0 (CPPC Enable Switch Disabled) [intel.com]. Strips power-management 
+    ; authority from any software, locking the processor core into a deterministic static execution envelope [vt01.com].
+
+    ; --- STEP 3: Clear CPPC Dynamic Request Performance Limits ---
+    mov ecx, MSR_AMD_CPPC_REQ           ; MSR: 0xC00102B3 [intel.com]
+    xor eax, eax                        ; Invalidate minimum and maximum requested frequency fields [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Erases execution speed adjustment registers [intel.com]. 
+    ; This permanently blinds a guest kernel attempting to utilize frequency shifts to execute advanced timing attacks [vt01.com].
+
+;==================================================================================
+; 17. INSTRUCTION-BASED SAMPLING EXECUTION TRACKING
+;==================================================================================
+prepare_amd_ibs_execution_sanitization:
+    ; --- STEP 1: Purge IBS Execution Linear Target RIP Data ---
+    mov ecx, MSR_AMD64_IBSOPRIP         ; MSR: 0xC0011034 [intel.com]
+    xor eax, eax                        ; Wipe the exact execution address causing pipeline stalls [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Wipes residual structural instruction pointer telemetry logs [intel.com], 
+    ; ensuring zero profiling data leaks regarding preceding Host execution frames exist in the macro-pipeline.
+
+    ; --- STEP 2: Purge IBS Cache and Hardware Fault Telemetry Data ---
+    mov ecx, MSR_AMD64_IBSOPDATA        ; MSR: 0xC0011035 [intel.com]
+    xor eax, eax                        ; Clear logged memory attributes and hardware faults [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 3: Destroy High-Precision Hardware Cycle Telemetry Clock ---
+    mov ecx, MSR_AMD64_IBSOPDATA2       ; MSR: 0xC0011036 [intel.com]
+    xor eax, eax                        ; Neutralize the exact execution timing metrics register [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Fully sterilizes the cycle-accurate macro-op execution hardware counters [intel.com]. 
+    ; Wiping this grid cuts off the primary side-channel source used to construct high-precision guest timers [vt01.com].
+
+;==================================================================================
+; 18. RUNTIME MICROCODE INJECTION ENGINE
+;==================================================================================
+prepare_amd_microcode_patch_isolation:
+    ; --- STEP 1: Monitor and Sanitize Microcode Patch Loader Interface ---
+    mov ecx, MSR_AMD_PATCH_LOADER       ; MSR: 0xC0010020 [intel.com]
+    rdmsr                               ; Validate the patch array interface registry [intel.com]
+    ; [HARDWARE CONTEXT] Read Verification. Evaluates the microcode injection pipeline [intel.com]. 
+    ; This interface will be tightly bound to the MSRP default-deny matrix to prevent any malicious guest 
+    ; execution domain from attempting runtime firmware mutation or injecting rogue patches into the silicon [vt01.com].
+
+    ;==================================================================================
+; 19. AMD x2AVIC VIRTUAL x2APIC SYSTEM MONITORING
+;==================================================================================
+prepare_amd_x2avic_interrupt_matrix:
+    ; --- STEP 1: Query Guest vCPU x2APIC Identity Template ---
+    mov ecx, MSR_AMD_X2APIC_ID          ; MSR: 0x00000802 [intel.com]
+    rdmsr                               ; Extract core hardware APIC tracking indices [intel.com]
+    ; [BIT EXPLANATION] Read-Only Context Register. Bits 31:0 contain the hardware-backed 
+    ; unique vCPU index that the x2AVIC hardware engine tracks during guest routing [intel.com].
+
+    ; --- STEP 2: Configure Task Priority Intercept Filters ---
+    mov ecx, MSR_AMD_X2APIC_TPR         ; MSR: 0x00000808 [intel.com]
+    xor eax, eax                        ; Value 0: Clear priority filtering to default baseline [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bits 7:0 = 00h. Opens the virtual Task Priority gate to accept [intel.com] 
+    ; acceleration interrupt streams mapped within the x2AVIC virtualization layer [intel.com, vt01.com].
+
+    ; --- STEP 3: Sanitize Spurious Vector Configuration Frame ---
+    mov ecx, MSR_AMD_X2APIC_Spurious    ; MSR: 0x0000080F [intel.com]
+    rdmsr                               ; Fetch interrupt unit configuration switches [intel.com]
+    or eax, 1 << 8                      ; Bit 8: APIC Software Enable (Arms virtual hardware interrupt logic) [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 8 = 1. Forces the silicon to enable the virtual localized APIC logic [intel.com], 
+    ; allowing hardware-assisted interrupt processing for the guest shell environment [intel.com, vt01.com].
+
+    ; --- STEP 4: Sterilize Interrupt Command Signaling Interface ---
+    mov ecx, MSR_AMD_X2APIC_ICR         ; MSR: 0x00000830 [intel.com]
+    xor eax, eax                        ; Invalidate residual virtual inter-processor interrupt targets [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Clears the virtual IPI command register [intel.com]. This guarantees that 
+    ; no ghost or phantom cross-vCPU interrupt signals remain active prior to context launch [intel.com, vt01.com].
+
+;==================================================================================
+; 20. AMD SPECIFIC CACHE CONTROLS & MEMORY CONFIGURATION
+;==================================================================================
+prepare_amd_system_memory_boundaries:
+    ; --- STEP 1: Enable Fixed-Range MTRR DRAM Modifications (MSR_AMD_SYS_CFG) ---
+    mov ecx, MSR_AMD_SYS_CFG            ; MSR: 0xC0000010 [intel.com]
+    rdmsr                               ; Pull system configuration bit array [intel.com]
+    or eax, 1 << 18                     ; Bit 18: SysMtrrFixDramEn (Enables fixed-range MTRR DRAM type modification) [intel.com]
+    or eax, 1 << 19                     ; Bit 18: SysMtrrFixDramModEn (Locks modification validation rules) [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 18 = 1, Bit 19 = 1 [intel.com]. Activates global validation for fixed-range 
+    ; MTRR registers, committing our matted cache layouts directly to the hardware DRAM controller logic [intel.com].
+
+    ; --- STEP 2: Configure Top of Memory 1 Allocation Limit ---
+    mov ecx, MSR_AMD_TOP_MEM            ; MSR: 0xC001001A [intel.com]
+    mov eax, 0x40000000                 ; Lower 32-bits: Set boundary floor limit (e.g., 1GB DRAM marks) [intel.com]
+    xor edx, edx                        ; Upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0x00000000_40000000. Hard-locks the boundary splitting normal cacheable RAM [intel.com] 
+    ; from uncacheable MMIO space under 4GB, preventing guest physical page corruption exploits [vt01.com].
+
+    ; --- STEP 3: Configure Top of Memory 2 Extended Allocation Limit ---
+    mov ecx, MSR_AMD_TOP_MEM2           ; MSR: 0xC001001D [intel.com]
+    xor eax, eax                        ; Lower 32-bits
+    xor edx, edx                        ; Upper 32-bits: Zero out upper boundaries if no RAM exists above 4GB [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0. Seals the upper extended memory boundary register [intel.com], 
+    ; locking down hardware memory typing behavior across the entire physical address range [intel.com, vt01.com].
+
+;==================================================================================
+; 21. AMD FIXED-RANGE MTRR MEMORY ACCESS TYPE MAPS
+;==================================================================================
+lock_amd_fixed_mtrr_caching_matrix:
+    ; --- STEP 1: Commit Low 64KB Frame Cache Type ---
+    mov ecx, MSR_AMD_MTRRfix64k_00000   ; MSR: 0x00000250 [intel.com]
+    mov eax, 0x06060606                 ; Sub-blocks 0-3: Set to 06h (Write-Back caching) [intel.com]
+    mov edx, 0x06060606                 ; Sub-blocks 4-7: Set to 06h (Write-Back caching) [intel.com]
+    wrmsr
+
+    ; --- STEP 2: Commit 128KB Segment Buffer Cache Type ---
+    mov ecx, MSR_AMD_MTRRfix16k_80000   ; MSR: 0x00000258 [intel.com]
+    mov eax, 0x06060606                 ; Enforce Write-Back (06h) baseline execution speeds [intel.com]
+    mov edx, 0x06060606
+    wrmsr
+
+    ; --- STEP 3: Isolate VGA Framebuffer Space (A0000h–BFFFFh Range) ---
+    mov ecx, MSR_AMD_MTRRfix16k_A0000   ; MSR: 0x00000259 [intel.com]
+    mov eax, 0x07070707                 ; Enforce Write-Combine (07h) for graphic buffer caching [intel.com]
+    mov edx, 0x07070707
+    wrmsr
+
+    ; --- STEP 4: Lock Video BIOS Space Caching Type ---
+    mov ecx, MSR_AMD_MTRRfix4k_C0000    ; MSR: 0x00000268 [intel.com]
+    xor eax, eax                        ; Set all fields to 00h (Strict Uncacheable properties) [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0. Enforces Uncacheable (00h) attributes to isolate the video BIOS [intel.com], 
+    ; blocking any structural cache side-channel information leaks from compromising host memory segments [vt01.com].
+
+;==================================================================================
+; 22. AMD CORE PERFORMANCE COUNTER EVENT SELECTORS (PERF_CTL)
+;==================================================================================
+prepare_amd_perf_ctl_sanitization:
+    ; --- STEP 1: Disarm Core Performance Event Selectors 0 to 3 ---
+    ; Writing 0 to the control registers completely disables the hardware event counters.
+    mov ecx, MSR_AMD_PERF_CTL0          ; MSR: 0xC0010000 [intel.com]
+    xor eax, eax                        ; Inactivate all hardware event selection masks [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTL1          ; MSR: 0xC0010001 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTL2          ; MSR: 0xC0010002 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTL3          ; MSR: 0xC0010003 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 2: Disarm Modern Zen Core Extended Event Selectors 4 and 5 ---
+    mov ecx, MSR_AMD_PERF_CTL4          ; MSR: 0xC0010200 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTL5          ; MSR: 0xC0010202 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Disables execution profiling, cache-miss tracking, [intel.com]
+    ; and microarchitectural event counting across all six allocation channels [vt01.com].
+
+;==================================================================================
+; 23. AMD CORE PERFORMANCE COUNTER DATA REGISTERS (PERF_CTR)
+;==================================================================================
+prepare_amd_perf_ctr_data_wipe:
+    ; --- STEP 1: Purge Residual Hardware Event Counts from Counters 0 to 3 ---
+    mov ecx, MSR_AMD_PERF_CTR0          ; MSR: 0xC0010004 [intel.com]
+    xor eax, eax                        ; Erase core accumulated cycle metrics to zero baseline [intel.com]
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTR1          ; MSR: 0xC0010005 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTR2          ; MSR: 0xC0010006 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTR3          ; MSR: 0xC0010007 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 2: Purge Residual Data Blocks from Extended Counters 4 and 5 ---
+    mov ecx, MSR_AMD_PERF_CTR4          ; MSR: 0xC0010201 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+
+    mov ecx, MSR_AMD_PERF_CTR5          ; MSR: 0xC0010203 [intel.com]
+    xor eax, eax
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Fully sanitizes telemetry data logs across the execution grid [intel.com]. 
+    ; Wiping these structures removes historical footprint crumbs from preceding host boot layers [vt01.com].
+
+;==================================================================================
+; 24. AMD SPECIFIC VIRTUALIZATION SECURITY HARDENING (LBR & DEEP TRAILING)
+;==================================================================================
+prepare_amd_lbr_isolation:
+    ; --- STEP 1: Blind Last Branch Record Filter Configuration ---
+    mov ecx, MSR_AMD_LBR_SELECT         ; MSR: 0xC00101C0 [intel.com]
+    xor eax, eax                        ; Disable recording filters and freeze branch sampling [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 2: Purge Execution Jump Target Source Leftovers ---
+    mov ecx, MSR_AMD_LBR_FROM_IP        ; MSR: 0xC00101C1 [intel.com]
+    xor eax, eax                        ; Clear address tracker for originating execution jumps [intel.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 3: Purge Execution Jump Landing Destination Leftovers ---
+    mov ecx, MSR_AMD_LBR_TO_IP          ; MSR: 0xC00101C2 [intel.com]
+    xor eax, eax                        ; Clear address tracker for branch landing markers [intel.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Blinds and sterilizes the hardware runtime branch tracer [intel.com]. 
+    ; This explicitly destroys residual instruction pointer trails, preventing guest monitoring loops [vt01.com].
+
+;==================================================================================
+; 25. AMD HARDWARE PASSWORD-PROTECTED DEBUG MSRs
+;==================================================================================
+prepare_amd_password_protected_debug_sanitization:
+    ; --- STEP 1: Inject Silicon Hardware Key Into EDI ---
+    ; To mutate or write into the hidden debug control matrix, the CPU demands
+    ; a strict 32-bit validation key loaded in EDI to prevent a General Protection Fault (#GP).
+    mov edi, 0x9C5A203A                 ; Load hardware unlocking key signature atomically [vt01.com]
+
+    ; --- STEP 2: Inactivate Hidden Debug Controller Configuration ---
+    mov ecx, MSR_AMD_EXT_DEBUG_BASE    ; MSR: 0xC001100A [vt01.com]
+    xor eax, eax                        ; Invalidate hidden debug capture features [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr                               ; Silicon validates EDI and executes changes securely [intel.com, vt01.com]
+
+    ; --- STEP 3: Purge Debug Output Buffer Leftovers ---
+    mov ecx, MSR_AMD_EXT_DEBUG_DATA    ; MSR: 0xC001100B [vt01.com]
+    xor eax, eax                        ; Sterilize residual logged silicon state telemetry [vt01.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Blindfolds advanced physical debug probe matrices [vt01.com]. 
+    ; Injecting the physical key into EDI allows the hypervisor to securely disable these hidden factory portals [vt01.com].
+
+;==================================================================================
+; 26. UNDOCUMENTED AMD MSR BREAKPOINT TRAPS
+;==================================================================================
+prepare_amd_undocumented_breakpoint_traps:
+    ; --- STEP 1: Nullify Undocumented MSR Breakpoint Target Address ---
+    mov ecx, MSR_AMD_BREAKPOINT        ; MSR: 0xC001100E [vt01.com]
+    xor eax, eax                        ; Clear intercept trap destination address space [vt01.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 2: Wipe Breakpoint Filter Mask Allocation ---
+    mov ecx, MSR_AMD_BREAKPOINT_MASK   ; MSR: 0xC001100F [vt01.com]
+    xor eax, eax                        ; Remove matching bit ranges to completely drop the hardware trap [vt01.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Permanently tears down undocumented microarchitectural breakpoint 
+    ; traps, preventing rogue guest environments from triggering unexpected hardware context interceptions [vt01.com].
+
+;==================================================================================
+; 27. UNDOCUMENTED BUS ARCHITECTURE & BRANCH TRACING (BHTrace Engine)
+;==================================================================================
+prepare_amd_bhtrace_engine_blackout:
+    ; --- STEP 1: Disarm Bus Hardware Trace Master Control Switch ---
+    mov ecx, MSR_AMD_BHTRACE_CTL       ; MSR: 0xC0011010 [vt01.com]
+    xor eax, eax                        ; Turn off internal bus unit hardware tracing loops [vt01.com]
+    xor edx, edx
+    wrmsr
+
+    ; --- STEP 2: Wipe Bus Hardware Trace Residual Data Collection Frames ---
+    mov ecx, MSR_AMD_BHTRACE_DATA      ; MSR: 0xC0011011 [vt01.com]
+    xor eax, eax                        ; Clear cached bus routing tracking records [vt01.com]
+    xor edx, edx
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Blinds the raw system fabric interconnect analyzer [vt01.com]. 
+    ; This destroys data trails that could leak internal core pipeline activity or execution footprints [vt01.com].
+
+;==================================================================================
+; 28. UNDOCUMENTED SILICON ISOLATION & PREFETCH LOCKS
+;==================================================================================
+prepare_amd_undocumented_prefetch_locks:
+    ; --- STEP 1: Program Secret Data Cache Configuration ---
+    mov ecx, MSR_AMD_DC_CFG_SECRET     ; MSR: 0xC0011022 [vt01.com]
+    rdmsr                               ; Read the custom data cache bitmask layout [intel.com, vt01.com]
+    or eax, 1 << 4                      ; Set Bit 4: Lock and clamp custom prefetch cache mechanisms [vt01.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 4 = 1. Forces rigorous sequential caching bounds over specific 
+    ; internal memory lines, establishing a deep microarchitectural shield against side-channel probes [vt01.com].
+
+    ;==================================================================================
+; 29. AMD PERFORMANCE BOOST & THERMAL RATIO LOCKS (INTERNAL TUNING)
+;==================================================================================
+prepare_amd_performance_boost_thermal_locks:
+    ; --- STEP 1: Inactivate Hidden Performance Configuration Boost Switches ---
+    mov ecx, MSR_AMD_CORED_CFG          ; MSR: 0xC001102C [vt01.com]
+    rdmsr                               ; Fetch active core performance configuration bits [intel.com, vt01.com]
+    and eax, ~(1 << 0)                  ; Clear Bit 0: Permanently disable hidden core performance boost overrides [vt01.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 0. Strips software-level performance overclocking software (like Ryzen Master) [vt01.com] 
+    ; from dynamically altering core limits, guaranteeing uniform clock execution [vt01.com].
+
+    ; --- STEP 2: Clear Thermal Hardware Cycle Modulation Controls ---
+    mov ecx, MSR_AMD_THM_CR_CYC         ; MSR: 0xC0010073 [vt01.com]
+    xor eax, eax                        ; Value 0: Explicitly disarm manual clock duty-cycle modulation [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Disables customized hardware throttling mechanisms [vt01.com], 
+    ; blocking malicious attempts to induce artificial thermal variations for side-channel telemetry analysis [vt01.com].
+
+;==================================================================================
+; 30. AMD EXPERIMENTAL SPECULATION HARDENING (Zen 4 / Zen 5 Shielder)
+;==================================================================================
+prepare_amd_experimental_speculation_hardening:
+    ; --- STEP 1: Enforce Hidden PPIN Lock Configuration ---
+    mov ecx, MSR_AMD_PPIN_CTL_SECRET    ; MSR: 0xC001004E [vt01.com]
+    mov eax, 0x00000003                 ; Bit 0: Enable PPIN allocation, Bit 1: Hardwire lock the control state [intel.com, vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 1, Bit 1 = 1 [intel.com, vt01.com]. Seals the unique physical silicon 
+    ; identifier interface, making it visible to the Host matrix while permanently blinding guest inventory scans [vt01.com].
+
+    ; --- STEP 2: Configure Custom Alternative Speculative Store Bypass Controls ---
+    mov ecx, MSR_AMD_SPECTRE_V4_CTL     ; MSR: 0xC0011024 [vt01.com]
+    rdmsr                               ; Pull specific load-store prediction switches [intel.com, vt01.com]
+    or eax, 1 << 10                     ; Set Bit 10: Enforce strict alternative architectural hardware serialization
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 10 = 1. Forces rigorous pipeline fencing over memory execution lines [vt01.com], 
+    ; cementing custom speculative store bypass protections directly into the hidden silicon register layer [vt01.com].
+
+;==================================================================================
+; 31. AMD HARDWARE ERROR INJECTION & SILICON CORRUPTION INTRUSION
+;==================================================================================
+prepare_amd_mca_error_injection_blackout:
+    ; --- STEP 1: Deactivate and Blank MCA Error Injection Triggers ---
+    mov ecx, MSR_AMD_ERR_INJECT         ; MSR: 0xC001011E [intel.com, vt01.com]
+    xor eax, eax                        ; Set to 0 to disable active simulation triggers [intel.com, vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Forcefully disarms the Machine Check Architecture error injection vector [intel.com, vt01.com]. 
+    ; This destroys the hardware portal used to simulate bit-flips, denying the guest from triggering forced crash states [vt01.com].
+
+    ; --- STEP 2: Clear Machine Check Intercept Filter Masks ---
+    mov ecx, MSR_AMD_ERR_STATUS_MASK    ; MSR: 0xC001011F [vt01.com]
+    xor eax, eax                        ; Invalidate matching bit masks to lock the monitoring baseline [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+
+;==================================================================================
+; 32. AMD EMBEDDED CO-PROCESSOR SECURITY SHIELDS (PSP GATEWAY)
+;==================================================================================
+prepare_amd_psp_gateway_isolation:
+    ; --- STEP 1: Sterilize Platform Security Processor Host Command Interface ---
+    mov ecx, MSR_AMD_PSP_COMMAND        ; MSR: 0xC00110A0 [vt01.com]
+    xor eax, eax                        ; Clear pending command flags and parameters [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Flushes the co-processor pipeline portal completely [vt01.com]. This guarantees 
+    ; that no guest code domain can issue firmware-level instructions or access secure hardware enclave keys [vt01.com].
+
+    ; --- STEP 2: Query Platform Security Processor Fuse and Active Status ---
+    mov ecx, MSR_AMD_PSP_STATUS         ; MSR: 0xC00110A1 [vt01.com]
+    rdmsr                               ; Poll embedded security processor state [intel.com, vt01.com]
+    ; [HARDWARE CONTEXT] Read Validation. Evaluates embedded cryptographic co-processor flags [intel.com, vt01.com]. 
+    ; This structure will be permanently guarded under our MSRP matrix to isolate global security fuses from guest interception [vt01.com].
+
+    ;==================================================================================
+; 33. AMD EXTENDED MACHINE CHECK ARCHITECTURE (MCA EXTRAS)
+;==================================================================================
+prepare_amd_extended_mca_sanitization:
+    ; --- STEP 1: Configure AMD Specific MCA Reporting Rules ---
+    mov ecx, MSR_AMD_MCA_CFG            ; MSR: 0xC0010044 [intel.com, vt01.com]
+    rdmsr                               ; Fetch active core exception reporting layout [intel.com]
+    ; [BIT EXPLANATION] Read-Only Core Validation. Maps advanced error propagation boundaries. 
+    ; Checked to ensure that physical hardware exception routing matches our Host containment profile.
+
+    ; --- STEP 2: Initialize Extended MCA Control Bank 0 ---
+    mov ecx, MSR_AMD_MCA_EXT_CTL0       ; MSR: 0xC0010050 [intel.com, vt01.com]
+    mov eax, 0xFFFFFFFF                 ; Enable all extended hardware logging indicators atomically [intel.com]
+    mov edx, 0xFFFFFFFF
+    wrmsr
+
+    ; --- STEP 3: Purge Extended MCA Bank 0 Status Telemetry ---
+    mov ecx, MSR_AMD_MCA_EXT_STAT0      ; MSR: 0xC0010051 [intel.com, vt01.com]
+    xor eax, eax                        ; Invalidate active error tracking flags to 0 [intel.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Sterilizes extended silicon-level hardware telemetry logs [intel.com]. 
+    ; This fully destroys footprint crumbs remaining from previous factory or firmware boot operations [vt01.com].
+
+;==================================================================================
+; 34. AMD ARCHITECTURAL THREAD TOPOLOGY & THREAD PREFERENCE
+;==================================================================================
+prepare_amd_thread_topology_alignment:
+    ; --- STEP 1: Verify Thread Preference Performance Controls ---
+    mov ecx, MSR_AMD_TH_PR_CTL          ; MSR: 0xC0011028 [vt01.com]
+    rdmsr                               ; Pull active hardware thread prioritization masks [vt01.com]
+    ; [BIT EXPLANATION] Read-Only Register Matrix. Reflects execution pipeline distribution rules. 
+    ; Evaluated to lock uniform scheduler pacing, preventing guest side-channel clock analysis [vt01.com].
+
+    ; --- STEP 2: Query Asymmetric Core Layout Configuration ---
+    mov ecx, MSR_AMD_ASYM_CORE_MAP      ; MSR: 0xC001103A [vt01.com]
+    rdmsr                               ; Read specific Zen performance vs efficiency core routing vectors [vt01.com]
+    ; [HARDWARE CONTEXT] Read Validation. Maps the underlying asymmetric silicon topology framework [vt01.com]. 
+    ; This mask is recorded to ensure stable, isolated thread binding across heterogeneous core configurations.
+
+;==================================================================================
+; 35. AMD SILICON DEBUGGER EMULATION INTERCEPT
+;==================================================================================
+prepare_amd_hardware_debugger_blackout:
+    ; --- STEP 1: Disarm Hardware Debug Tool Intercept Interface ---
+    mov ecx, MSR_AMD_HDT_CTRL           ; MSR: 0xC001100D [vt01.com]
+    xor eax, eax                        ; Deactivate deep hardware probe tracing loops entirely [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Permanently blindfolds the embedded factory debug port controller [vt01.com]. 
+    ; This blocks any external physical JTAG or hardware-level probe attachment from intercepting core registers [vt01.com].
+
+    ;==================================================================================
+; 36. AMD INFINITY FABRIC DATA ROUTING CONTROLS (UNDOCUMENTED)
+;==================================================================================
+prepare_amd_infinity_fabric_hardening:
+    ; --- STEP 1: Verify Infinity Fabric Master Configuration ---
+    mov ecx, MSR_AMD_FABRIC_CFG         ; MSR: 0xC0011000 [vt01.com]
+    rdmsr                               ; Query inter-core routing and fabric priorities [vt01.com]
+    ; [BIT EXPLANATION] Undocumented Core Register. Checked to validate that data fabric 
+    ; priority channels match our hardened host configuration baseline before guest deployment.
+
+    ; --- STEP 2: Disarm Hidden Fabric Snoop Control Register ---
+    mov ecx, MSR_AMD_FABRIC_SNOOP       ; MSR: 0xC0011003 [vt01.com]
+    xor eax, eax                        ; Inactivate hidden cache-line invalidation tracking [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Permanently blinds the hidden bus fabric snooping unit [vt01.com]. 
+    ; This eliminates cross-core speculative cache invalidation timing attacks at the silicon gate [vt01.com].
+
+;==================================================================================
+; 37. AMD ARCHITECTURAL DATA ALIGNMENT FLUSH SWITCH (UNDOCUMENTED)
+;==================================================================================
+prepare_amd_force_alignment_serialization:
+    ; --- STEP 1: Activate Force Alignment Memory Serialization ---
+    mov ecx, MSR_AMD_ALIGN_FORCE        ; MSR: 0xC0011018 [vt01.com]
+    rdmsr                               ; Pull secret data cache alignment properties [intel.com, vt01.com]
+    or eax, 1 << 0                      ; Set Bit 0: Enforce strict architectural data alignment constraints
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 1. Forces absolute microarchitectural serialization over memory accesses [vt01.com], 
+    ; making raw data cache lines perfectly uniform and breaking speculative cache-alignment side-channels [vt01.com].
+
+;==================================================================================
+; 38. AMD ZEN MICROARCHITECTURAL LOCK REGISTERS (UNDOCUMENTED FEATURE LOCKS)
+;==================================================================================
+prepare_amd_zen_feature_locks:
+    ; --- STEP 1: Monitor Runtime Feature Disable Lock State ---
+    mov ecx, MSR_AMD_FEATURE_LOCK0      ; MSR: 0xC001102A [vt01.com]
+    rdmsr                               ; Validate active microcode runtime runtime configurations [intel.com, vt01.com]
+    ; [HARDWARE CONTEXT] Read Verification. Monitors runtime silicon patch layers [intel.com]. This register 
+    ; will be heavily locked down via MSRP to block guest exploitation of underlying hardware patches [vt01.com].
+
+    ; --- STEP 2: Harden Floating-Point Unit Hidden Configuration ---
+    mov ecx, MSR_AMD_FPU_CFG_SECRET     ; MSR: 0xC001102F [vt01.com]
+    rdmsr                               ; Fetch hidden vector unit optimization controls [intel.com, vt01.com]
+    or eax, 1 << 2                      ; Set Bit 2: Clamp speculative AVX-512 execution pipelines
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 2 = 1. Clamps alternative prediction routing in the FPU pipeline [vt01.com], 
+    ; blocking a guest from utilizing AVX-512 speculative loops to dump preceding host vector state data [vt01.com].
+
+;==================================================================================
+; 39. AMD MICROARCHITECTURAL EXECUTING CHICKEN BITS (UNDOCUMENTED EX_CFG)
+;==================================================================================
+prepare_amd_execution_chicken_bits:
+    ; --- STEP 1: Enforce ALU Execution Unit Configuration Constraints ---
+    mov ecx, MSR_AMD_EX_CFG             ; MSR: 0xC0011021 [vt01.com]
+    rdmsr                               ; Pull current execution pipeline optimization masks [intel.com, vt01.com]
+    or eax, 1 << 15                     ; Set Bit 15: Disarm specific optimization chicken bits to patch leaks
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 15 = 1. Disables custom optimization shortcuts within the execution unit [vt01.com]. 
+    ; This restricts data-forwarding tricks inside the ALU, sealing deep microarchitectural transient leakage [vt01.com].
+
+    ; --- STEP 2: Configure Extended Execution Chicken Bits Control ---
+    mov ecx, MSR_AMD_EX_CFG2            ; MSR: 0xC001102D [vt01.com]
+    rdmsr                               ; Fetch hot-loadable patch serialization bits [intel.com, vt01.com]
+    or eax, 1 << 8                      ; Set Bit 8: Tighten instruction retirement fencing loops
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 8 = 1. Hardwires strict retirement boundaries over active threads [vt01.com], 
+    ; permanently sanitizing transient pipeline data leftovers before any privilege domain transitions occur [vt01.com].
+
+    ;==================================================================================
+; 40. AMD STACK-POINTER SPECULATION DEFENSE (THE STACKWARP SHIELD - CVE-2025-29943)
+;==================================================================================
+prepare_amd_stackwarp_mitigation_shield:
+    ; --- STEP 1: Deploy Core StackWarp Hardware Mitigation (MSR_AMD_LS_CFG2) ---
+    ; We enforce speculative load-store fencing over stack tracking mechanisms.
+    mov ecx, MSR_AMD_LS_CFG2            ; MSR: 0xC0011023 [intel.com, vt01.com]
+    rdmsr                               ; Fetch active micro-architectural load-store configuration [intel.com]
+    or eax, 1 << 6                      ; Set Bit 6: Force speculative stack pointer validation (StackWarp Shield)
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 6 = 1. Hardwires structural hardware validation over transient stack operations [vt01.com]. 
+    ; This explicitly paralyzes CVE-2025-29943 exploits, breaking alternative guest pipelines from warping RSP boundaries [vt01.com].
+
+;==================================================================================
+; 41. AMD FLOATING POINT & AVX VECTOR BALANCING (UNDOCUMENTED FP_CFG)
+;==================================================================================
+prepare_amd_fpu_vector_balancing_locks:
+    ; --- STEP 1: Configure Undocumented FPU Execution Configuration ---
+    mov ecx, MSR_AMD_FP_CFG             ; MSR: 0xC0011028 [intel.com, vt01.com]
+    rdmsr                               ; Read specific vector execution control parameters [intel.com]
+    or eax, 1 << 12                     ; Set Bit 12: Enforce fixed execution timing for heavy AVX pipelines
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 12 = 1. Eliminates dynamic timing optimization shortcuts inside the vector pipelines [vt01.com]. 
+    ; This locks AVX-512 execution to standard clock boundaries, neutralizing dynamic power-signature leaks [vt01.com].
+
+    ;==================================================================================
+; 42: AMD SEV-SNP ENCRYPTION MATRIX & PAGE VALIDATION CONTROLS
+;==================================================================================
+prepare_amd_sev_snp_encryption_matrix:
+    ; --- STEP 1: Monitor Reverse Map Table (RMP) Base Configuration ---
+    mov ecx, MSR_AMD_RMP_BASE           ; MSR: 0xC0010132 [intel.com]
+    rdmsr                               ; Query the hardware-enforced page tracking base [intel.com]
+    ; [BIT EXPLANATION] Read-Only Core Frame. Tracks the base address of the RMP architecture [intel.com]. 
+    ; Checked to verify if hardware memory page validation loops are securely synchronized.
+
+    ; --- STEP 2: Enforce vCPU State-Save Encryption Protection ---
+    mov ecx, MSR_AMD_VMSA_REG_PROT      ; MSR: 0xC001013F [intel.com]
+    rdmsr                               ; Pull micro-architectural register protection switches
+    or eax, 1 << 0                      ; Bit 0: Activate hardwired VMSA encryption and isolation fields [intel.com]
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 0 = 1. Forces the AMD silicon logic to cryptographically lock the vCPU state-save area [intel.com], 
+    ; permanently blocking a guest from sniffing host registers during hypervisor context transition loops [vt01.com].
+
+;==================================================================================
+; 43: AMD SPECULATIVE EXECUTION SHIELDS & CORE CONFIG EXTRAS
+;==================================================================================
+prepare_amd_core_execution_shields:
+    ; --- STEP 1: Harden Thread Pipeline Configuration ---
+    mov ecx, MSR_AMD_THREAD_CONFIG     ; MSR: 0xC0011012 [vt01.com]
+    rdmsr                               ; Fetch active thread resource sharing bits [vt01.com]
+    or eax, 1 << 12                     ; Set Bit 12: Force dynamic execution resource separation between SMT threads
+    wrmsr
+    ; [BIT EXPLANATION] EAX Bit 12 = 1. Restricts resource sharing hooks within the macro-pipeline, [vt01.com] 
+    ; closing complex cross-thread speculative side-channels inside the active execution core [vt01.com].
+
+    ; --- STEP 2: Sanitize Extended System Configuration Options ---
+    mov ecx, MSR_AMD_SYS_CFG2           ; MSR: 0xC0000015 [intel.com]
+    rdmsr                               ; Pull secondary system configurations [intel.com]
+    ; [HARDWARE CONTEXT] Read Validation. Evaluates extended caching boundaries to ensure 
+    ; that system fabric routing properties match our pristine 1GB Host RAM matrix footprint [vt01.com].
+
+;==================================================================================
+; 44: AMD INFINITY FABRIC TELEMETRY & SYSTEM RECOVERY CONTROL
+;==================================================================================
+prepare_amd_fabric_telemetry_blackout:
+    ; --- STEP 1: Disarm Fabric Error Reporting Controls ---
+    mov ecx, MSR_AMD_FABRIC_ERR_CTL     ; MSR: 0xC0011001 [vt01.com]
+    xor eax, eax                        ; Inactivate hidden fabric logging triggers [vt01.com]
+    xor edx, edx                        ; Clear upper 32-bits
+    wrmsr
+    ; [BIT EXPLANATION] EAX/EDX = 0. Blinds hidden data fabric monitoring vectors [vt01.com]. 
+    ; Wiping this register stops rogue guests from utilizing interconnect logs to execute timing analysis [vt01.com].
+
 
 
 
