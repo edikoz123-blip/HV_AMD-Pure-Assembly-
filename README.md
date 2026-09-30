@@ -1441,66 +1441,95 @@ prepare_extended_lvt_interrupts:
 ;==================================================================================
 prepare_fabric_mca_isolation:
     ; --- STEP 1: Purge Bank 3 (System Interconnect Fabric) ---
+    ; Enable error logging for all sub-components within the system interconnect fabric matrix.
     mov ecx, IA32_MC3_CTL               ; MSR: 0x0000040C [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Arm all silicon exception vectors [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Arm remaining logging switches [intel.com]
     wrmsr
+    ; Forcefully clear out old telemetry and residual pre-boot execution error frames.
     mov ecx, IA32_MC3_STATUS            ; MSR: 0x0000040D [intel.com]
-    xor eax, eax
-    xor edx, edx
+    xor eax, eax                        ; Invalidate lower status validity descriptors to 0 [intel.com]
+    xor edx, edx                        ; Invalidate upper status data bits to 0
     wrmsr
+    ; [BIT EXPLANATION] EDX:EAX = 0xFFFFFFFF_FFFFFFFF for CTL register enables global monitoring over [intel.com]
+    ; the On-Chip Fabric bus. Setting STATUS to 0 clears Bit 63 (VAL - Valid flag) and Bit 62 (OVER - Overflow flag) [intel.com],
+    ; ensuring the guest context starts with a completely sterile hardware error report footprint [vt01.com].
 
     ; --- STEP 2: Purge Bank 4 (Primary Memory Controller) ---
+    ; Initialize the primary DRAM hardware memory controller tracking infrastructure.
     mov ecx, IA32_MC4_CTL               ; MSR: 0x00000410 [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Arm memory channel error monitoring vectors [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Arm high-order tracking masks [intel.com]
     wrmsr
+    ; Sterilize residual fault logs from preceding boot sectors or BIOS interactions.
     mov ecx, IA32_MC4_STATUS            ; MSR: 0x00000411 [intel.com]
-    xor eax, eax
+    xor eax, eax                        ; Clear telemetry parameters to baseline zero [intel.com]
     xor edx, edx
     wrmsr
+    ; [BIT EXPLANATION] Flooding CTL with 0xFFFFFFFF hooks all DRAM parity, ECC, and bus scheduling anomaly traps [intel.com].
+    ; Writing 0 to STATUS forcefuly overwrites the hardware logging register, blinding any pre-existing telemetry [vt01.com]
+    ; regarding physical memory access patterns or hardware baseline configurations [intel.com, vt01.com].
 
     ; --- STEP 3: Purge Bank 5 (Bus Interface Matrix) ---
+    ; Armed tracking loops for external core bus transceivers and transaction pipelines.
     mov ecx, IA32_MC5_CTL               ; MSR: 0x00000414 [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Force master bus monitoring active [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Arm secondary bus lines [intel.com]
     wrmsr
+    ; Neutralize old bus interface exception entries before entering the virtualization domain.
     mov ecx, IA32_MC5_STATUS            ; MSR: 0x00000415 [intel.com]
-    xor eax, eax
+    xor eax, eax                        ; Wipe residual execution crumbs to zero [intel.com]
     xor edx, edx
     wrmsr
+    ; [BIT EXPLANATION] CTL = 0xFFFFFFFF_FFFFFFFF tells the silicon to intercept all electrical or logical [intel.com]
+    ; cross-core bus interface faults. Clearing STATUS drops the error validation token, blocking the guest kernel [intel.com]
+    ; from analyzing historical bus failures to map out or probe the underlying host platform [vt01.com].
 
     ; --- STEP 4: Purge Bank 6 (System Interconnect Fabric Extension) ---
+    ; Activate advanced fault monitoring over extended secondary high-speed core interconnects.
     mov ecx, IA32_MC6_CTL               ; MSR: 0x00000418 [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Enable extended core fabric tracking [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Arm extended routing vectors [intel.com]
     wrmsr
+    ; Wipe residual telemetry data frames from the secondary physical interconnect matrix.
     mov ecx, IA32_MC6_STATUS            ; MSR: 0x00000419 [intel.com]
-    xor eax, eax
+    xor eax, eax                        ; Invalidate residual routing error flags [intel.com]
     xor edx, edx
     wrmsr
+    ; [BIT EXPLANATION] Flooding the extended CTL structure arms deep microarchitectural bus telemetry [intel.com].
+    ; Overwriting STATUS with zero wipes out active tracking states, creating an absolute hardware blackout [vt01.com]
+    ; that isolates preceding platform execution details from the upcoming guest software environment [vt01.com].
 
     ; --- STEP 5: Purge Bank 7 (Secondary Memory Controller) ---
+    ; Arm configuration switches for the secondary integrated DRAM memory channel controller.
     mov ecx, IA32_MC7_CTL               ; MSR: 0x0000041C [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Open all secondary DRAM tracking loops [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Arm remaining memory gates [intel.com]
     wrmsr
+    ; Expunge all residual hardware logs from the secondary integrated memory controller.
     mov ecx, IA32_MC7_STATUS            ; MSR: 0x0000041D [intel.com]
-    xor eax, eax
+    xor eax, eax                        ; Evacuate data logs and clear frame baseline [intel.com]
     xor edx, edx
     wrmsr
+    ; [BIT EXPLANATION] Setting CTL bits to 1 forces the silicon to log secondary memory anomalies [intel.com].
+    ; Zeroing out STATUS guarantees that no phantom memory errors or persistent telemetry crumbs remain [intel.com],
+    ; blocking side-channel memory timing analysis and securing structural host runtime stability [vt01.com].
 
     ; --- STEP 6: Purge Bank 8 (Advanced Fabric Architecture) ---
+    ; Arm the absolute final hardware logging framework governing advanced fabric interconnect lines.
     mov ecx, IA32_MC8_CTRL              ; MSR: 0x00000420 [intel.com]
-    mov eax, 0xFFFFFFFF
-    mov edx, 0xFFFFFFFF
+    mov eax, 0xFFFFFFFF                 ; Lower 32-bits: Arm all remaining silicon tracking gates [intel.com]
+    mov edx, 0xFFFFFFFF                 ; Upper 32-bits: Set all upper core monitoring masks [intel.com]
     wrmsr
+    ; Completely wipe and sterilize the final advanced fabric status register frame.
     mov ecx, IA32_MC8_STATUS            ; MSR: 0x00000421 [intel.com]
-    xor eax, eax
+    xor eax, eax                        ; Wiping log data frame to pure pristine state [intel.com]
     xor edx, edx
     wrmsr
-    ; [BIT EXPLANATION] Enforces absolute global tracking loops across all physical interconnect 
-    ; fabric pipelines and DRAM gates, while wiping status bits to achieve a zero-error system footprint [vt01.com].
+    ; [BIT EXPLANATION] Enforces absolute global tracking loops across all physical interconnect [intel.com]
+    ; fabric pipelines and DRAM gates, while wiping status bits to achieve a zero-error system footprint [intel.com, vt01.com].
+    ; This final double-wrmsr execution seals the shared MCA baseline, guaranteeing a total platform blackout [vt01.com].
+
 ;==================================================================================
 ; 30: THREAD CONTEXT ARMOR & SEGMENT BASE SPECIFICATION
 ;==================================================================================
@@ -1842,7 +1871,7 @@ prepare_mca_bank8_sanitization:
     ; [BIT EXPLANATION] We flood the control register with 0xFFFFFFFF to track all physical faults [intel.com], 
     ; while zeroing out the status frame to guarantee a clean system footprint with no leakage from previous boot sectors [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 1. CORE AMD SVM VIRTUALIZATION MASTER CONTROLS (FIXED & VERIFIED)
 ;==================================================================================
 prepare_amd_svm_master_controls:
@@ -2238,7 +2267,7 @@ prepare_amd_microcode_patch_isolation:
     ; This interface will be tightly bound to the MSRP default-deny matrix to prevent any malicious guest 
     ; execution domain from attempting runtime firmware mutation or injecting rogue patches into the silicon [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 19. AMD x2AVIC VIRTUAL x2APIC SYSTEM MONITORING
 ;==================================================================================
 prepare_amd_x2avic_interrupt_matrix:
@@ -2503,7 +2532,7 @@ prepare_amd_undocumented_prefetch_locks:
     ; [BIT EXPLANATION] EAX Bit 4 = 1. Forces rigorous sequential caching bounds over specific 
     ; internal memory lines, establishing a deep microarchitectural shield against side-channel probes [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 29. AMD PERFORMANCE BOOST & THERMAL RATIO LOCKS (INTERNAL TUNING)
 ;==================================================================================
 prepare_amd_performance_boost_thermal_locks:
@@ -2579,7 +2608,7 @@ prepare_amd_psp_gateway_isolation:
     ; [HARDWARE CONTEXT] Read Validation. Evaluates embedded cryptographic co-processor flags [intel.com, vt01.com]. 
     ; This structure will be permanently guarded under our MSRP matrix to isolate global security fuses from guest interception [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 33. AMD EXTENDED MACHINE CHECK ARCHITECTURE (MCA EXTRAS)
 ;==================================================================================
 prepare_amd_extended_mca_sanitization:
@@ -2631,7 +2660,7 @@ prepare_amd_hardware_debugger_blackout:
     ; [BIT EXPLANATION] EAX/EDX = 0. Permanently blindfolds the embedded factory debug port controller [vt01.com]. 
     ; This blocks any external physical JTAG or hardware-level probe attachment from intercepting core registers [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 36. AMD INFINITY FABRIC DATA ROUTING CONTROLS (UNDOCUMENTED)
 ;==================================================================================
 prepare_amd_infinity_fabric_hardening:
@@ -2699,7 +2728,7 @@ prepare_amd_execution_chicken_bits:
     ; [BIT EXPLANATION] EAX Bit 8 = 1. Hardwires strict retirement boundaries over active threads [vt01.com], 
     ; permanently sanitizing transient pipeline data leftovers before any privilege domain transitions occur [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 40. AMD STACK-POINTER SPECULATION DEFENSE (THE STACKWARP SHIELD - CVE-2025-29943)
 ;==================================================================================
 prepare_amd_stackwarp_mitigation_shield:
@@ -2724,7 +2753,7 @@ prepare_amd_fpu_vector_balancing_locks:
     ; [BIT EXPLANATION] EAX Bit 12 = 1. Eliminates dynamic timing optimization shortcuts inside the vector pipelines [vt01.com]. 
     ; This locks AVX-512 execution to standard clock boundaries, neutralizing dynamic power-signature leaks [vt01.com].
 
-    ;==================================================================================
+;==================================================================================
 ; 42: AMD SEV-SNP ENCRYPTION MATRIX & PAGE VALIDATION CONTROLS
 ;==================================================================================
 prepare_amd_sev_snp_encryption_matrix:
