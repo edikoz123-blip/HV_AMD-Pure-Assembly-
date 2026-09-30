@@ -22,52 +22,52 @@ Protecting_mode_entry:
 
 [bits 32]
 entry_32bit:
-    mov ax, 0x10                ; Load 32-bit flat data descriptor offset into segment selectors
+    ; --- STEP 0: Prepare EAX Register for SKINIT Instruction ---
+    ; The SKINIT instruction requires EAX to contain the starting physical address
+    ; of the Secure Loader Block (SLB). The address must be 4KB aligned.
+    mov eax, 0x00010000         
+    skinit                      ; Trigger hardware Secure Startup, reset cores, and intercept SMM
+
+    ; --- STEP 1: Load Protected Mode Segment Selectors ---
+    mov ax, 0x10                ; Load flat 32-bit data descriptor (0x10 offset in GDT)
     mov ds, ax
     mov ss, ax 
     mov es, ax
 
+    ; --- STEP 2: Activate PAE (Physical Address Extension) ---
     mov eax, cr4
-    or eax, 1 << 5              ; Set bit 5 (PAE - Physical Address Extension) required for 64-bit Long Mode
-    mov cr4, eax
+    or eax, 1  Points to PDPT at 0xA000 (Present + Read/Write)
+    mov dword [0xA000], 0xB003  ; PDPT Entry -> Points to PD at 0xB000 (Present + Read/Write)
+    mov dword [0xB000], 0xC003  ; PD Entry   -> Points to PT at 0xC000 (Present + Read/Write)
 
-    ; --- Purge Paging Structure Buffer Space (0x9000 to 0xD000) ---
-    mov edi, 0x9000
-    xor eax, eax
-    mov ecx, 4096               ; 4096 * 4 bytes = 16KB of pristine memory initialization
-    rep stosd
-
-    ; --- Wire Identity Paging Structures ---
-    mov dword [0x9000], 0xA003  ; PML4 entry points directly to PDPT at 0xA000 (Present + Read/Write)
-    mov dword [0xA000], 0xB003  ; PDPT entry points directly to PD at 0xB000 (Present + R/W)
-    mov dword [0xB000], 0xC003  ; PD entry points directly to PT at 0xC000 (Present + R/W)
-
-    ; --- Construct PT Entries (Identity Maps the first 32KB of physical memory) ---
-    mov dword [0xC000], 0x00000003  ; Map 0x0000 to 0x0FFF
-    mov dword [0xC008], 0x00001003  ; Map 0x1000 to 0x1FFF  
-    mov dword [0xC010], 0x00002003  ; Map 0x2000 to 0x2FFF (VMCB Zone)
-    mov dword [0xC018], 0x00003003  ; Map 0x3000 to 0x3FFF (HSAVE Zone)
-    mov dword [0xC020], 0x00004003  ; Map 0x4000 to 0x4FFF (Hypervisor Entry Zone)
-    mov dword [0xC028], 0x00005003  ; Map 0x5000 to 0x5FFF   
-    mov dword [0xC030], 0x00006003  ; Map 0x6000 to 0x6FFF
-    mov dword [0xC038], 0x00007003  ; Map 0x7000 to 0x7FFF (Boot Sector Context Location)
+    ; --- STEP 5: Construct Page Table Entries (PTEs - 64-bit Aligned) ---
+    ; Structural Fix: Every entry occupies exactly 8 bytes (0x8 byte increments) to avoid Triple Faults.
+    mov dword [0xC000], 0x00000003  ; Maps 0x0000  to 0x0FFF (Present + Read/Write)
+    mov dword [0xC008], 0x00001003  ; Maps 0x1000  to 0x1FFF
+    mov dword [0xC010], 0x00002003  ; Maps 0x2000  to 0x2FFF (VMCB Area)
+    mov dword [0xC018], 0x00003003  ; Maps 0x3000  to 0x3FFF (HSAVE Area)
+    mov dword [0xC020], 0x00004003  ; Maps 0x4000  to 0x4FFF (Hypervisor Entry Zone)
+    mov dword [0xC028], 0x00005003  ; Maps 0x5000  to 0x5FFF   
+    mov dword [0xC030], 0x00006003  ; Maps 0x6000  to 0x6FFF
+    mov dword [0xC038], 0x00007003  ; Maps 0x7000  to 0x7FFF (Boot Sector Context Location)
 
     ; Commit Paging Base into Control Register 3
     mov eax, 0x9000		
     mov cr3, eax
 
-    ; --- Activate Long Mode & AMD Hardware Virtualization (SVM) ---
-    mov ecx, 0xC0000080         ; EFER MSR (Extended Feature Enable Register)
+    ; --- STEP 6: Enable Long Mode & AMD Secure Virtual Machine (SVM) ---
+    mov ecx, 0xC0000080         ; Access EFER MSR (Extended Feature Enable Register)
     rdmsr 
-    or eax, (1 << 8) | (1 << 12); Set bit 8 (LME - Long Mode Enable) & bit 12 (SVME - Secure Virtual Machine)
+    or eax, (1 << 8) | (1 << 12); Set Bit 8 (Long Mode Enable) & Bit 12 (Secure Virtual Machine Enable)
     wrmsr
 
-    ; Fire Paging context globally via CR0
+    ; --- STEP 7: Fire Paging Context and Flip CPU into 64-bit Long Mode ---
     mov eax, cr0
-    or eax, 1 << 31             ; Set bit 31 (PG - Paging Enable) to flip the CPU into 64-bit Long Mode
+    or eax, 1 << 31             ; Enable Bit 31 (PG - Paging) to execute the architecture switch
     mov cr0, eax		
 
-    jmp 0x18:entry_64bit        ; Far jump to cross segment limits into hardware 64-bit architecture
+    ; Far jump to break segment limits and cross officially into 64-bit hardware execution
+    jmp 0x18:entry_64bit        
 
 [bits 64]
 entry_64bit:
