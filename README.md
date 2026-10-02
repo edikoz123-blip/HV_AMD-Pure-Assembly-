@@ -2921,16 +2921,12 @@ static_rsdp_block  equ 0x0002F000         ; Hardcoded secure RAM address for our
 ;so no one gonna have any black box at checking and all of you can learn wish me goodluck it is going to be hard one Im one person
 ;If someone can check my hypervisor and In Out when everything gonna be I will thank you a lot. lets start are game:
 
-; ==============================================================================
-; HYPERVISOR PURE ASSEMBLY MANIFESTO - SECURED THREE-STRIKE RADAR
-; NO RET. NO STACK. ABSOLUTE SILICON ENFORCEMENT.
-; ==============================================================================
 
+
+;==================================================================================
+;                           Core System Tables 
+;==================================================================================
 acpi_three_strike_radar_entry:
-    ; --------------------------------------------------------------------------
-    ; Initialize loop counter for 3 scanning passes.
-    ; RDX acts as our strict 3-strike master counter.
-    ; --------------------------------------------------------------------------
     mov rdx, 3                              
 
 .initiate_radar_pass:
@@ -3216,6 +3212,96 @@ forge_secure_ssdt_bytecode:
     
     ; Zero padding matrix to perfectly align the table termination line
     mov dword [rdi + 13], 0x00000000
+;==========================================================================
+;                        Processor & Topology
+;==========================================================================
+
+_fortress_part_56_topology_forge:
+    ; --------------------------------------------------------------------------
+    ; STEP A: Initializing Base Pointers inside our Sovereign XSDT Matrix
+    ; RDI is assumed to point to our master XSDT Table Array (Offset allocation)
+    ; --------------------------------------------------------------------------
+    mov rdi, 0x00030000         ; Base of our XSDT Table
+    
+    ; --------------------------------------------------------------------------
+    ; STEP B: Forging ACPI_MADT (Multiple APIC Description Table)
+    ; Purpose: Controls Core topology, APIC IDs, and Interrupt Routing
+    ; --------------------------------------------------------------------------
+    mov rax, 0x00035000         ; Hardcoded Physical Address for MADT
+    mov [rdi + 68], rax         ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x43495041         ; Signature: "APIC" (ACPI_MADT_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 64     ; Static Length for Header + Base Local APIC
+    mov dword [rsi + 36], 0xFEE00000 ; Force Local APIC Base Address to standard silicon location
+    mov dword [rsi + 40], 1     ; PCAT_COMPAT Flag Enabled
+
+    ; --------------------------------------------------------------------------
+    ; STEP C: Forging ACPI_SRAT (System Resource Affinity Table)
+    ; Purpose: Dictates NUMA domains (Memory & CPU Affinity) to bind the Guest
+    ; --------------------------------------------------------------------------
+    mov rax, 0x00036000         ; Hardcoded Physical Address for SRAT
+    mov [rdi + 76], rax         ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x54415253         ; Signature: "SRAT" (ACPI_SRAT_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 48     ; Header length
+    mov dword [rsi + 36], 1     ; Table Revision (64-bit Affinity Support)
+    ; Remaining static resource blocks are left zeroed out to force a single NUMA domain
+
+    ; --------------------------------------------------------------------------
+    ; STEP D: Forging ACPI_SLIT (System Locality Distance Information Table)
+    ; Purpose: Freezes the matrix of memory latencies between NUMA nodes
+    ; --------------------------------------------------------------------------
+    mov rax, 0x00037000         ; Hardcoded Physical Address for SLIT
+    mov [rdi + 84], rax         ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x54494C53         ; Signature: "SLIT" (ACPI_SLIT_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 44     ; Header length + 1 Entry Matrix
+    mov qword [rsi + 36], 1     ; Total Number of Localities = 1 (Static Monolithic Domain)
+
+    ; --------------------------------------------------------------------------
+    ; STEP E: Forging ACPI_PPTT (Processor Properties Topology Table)
+    ; Purpose: Describes CPU Cache hierarchy (L1/L2/L3) to isolate side-channel attacks
+    ; --------------------------------------------------------------------------
+    mov rax, 0x00038000         ; Hardcoded Physical Address for PPTT
+    mov [rdi + 92], rax         ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x54545050         ; Signature: "PPTT" (ACPI_PPTT_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 36     ; Header length (No untrusted sub-structures allowed)
+    mov dword [rsi + 36], 0     ; Revision 0 - Completely flat topology representation
+
+    ; --------------------------------------------------------------------------
+    ; STEP F: Forging ACPI_MPST (Memory Power State Table)
+    ; Purpose: Overrides energy states of memory modules to block power attacks
+    ; --------------------------------------------------------------------------
+    mov rax, 0x00039000         ; Hardcoded Physical Address for MPST
+    mov [rdi + 100], rax        ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x5453504M         ; Signature: "MPST" (ACPI_MPST_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 40     ; Header length
+    ; Leaving power states configuration at 0 enforces static high-performance mode
+
+    ; --------------------------------------------------------------------------
+    ; STEP G: Forging ACPI_CDAT (Coherent Device Attribute Table)
+    ; Purpose: Defines routing attributes for Compute Express Link (CXL) fabric
+    ; --------------------------------------------------------------------------
+    mov rax, 0x0003A000         ; Hardcoded Physical Address for CDAT
+    mov [rdi + 108], rax        ; Register pointer in XSDT Array
+    
+    mov rsi, rax
+    mov ecx, 0x54414443         ; Signature: "CDAT" (ACPI_CDAT_SIGNATURE)
+    mov [rsi], ecx
+    mov dword [rsi + 4], 36     ; Header length (Emptied to declare zero coherent external fabric)
+
 
 
 
@@ -3225,8 +3311,8 @@ forge_secure_ssdt_bytecode:
     ;FACP build Verified
     ;FACS build Verified
     ;DSDT build Verified
+    ;ssdt build Verified
     ;
-
 
 
 
