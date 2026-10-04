@@ -3,7 +3,14 @@
 ;========================================================================
 ;------------- Created by The Ghost In The Matrix and Joshi -------------
 ;========================================================================
-
+; Im learning how to use stackless things only push pop when really needed but I prefer more registers
+; they are very fast but push pop are also great for physics and everything when you doing stackless
+; you actually defending yourself from ROP and that things so you can protect that Im gonna try
+; not to use CALL or RET in that so there not gonna be anything that they can use to steal my root operation
+; the only way for them to actually get root operation is to know physics better then the one who build it
+; or wether I forgot critical MSR but that project is for learning and Im going to build everything alone
+; hope that gonna teach you a lot I really love to do that hypervisor and get every 'black box' from AMD and just open it 
+; have a great learning with that hypervisor!!!
 
 ;Defines so I dont need to go back to AMD manual:
 
@@ -2819,95 +2826,23 @@ prepare_amd_fabric_telemetry_blackout:
 ;             GLOBAL UNIFIED TABLES (Common to Intel, AMD, RISC-V, ARM)
 ;==================================================================================
 
+; ==============================================================================
+; SYSTEMA ARCHITECTURA: THE PRISTINE ACPI CORE FOUNDATION SIGNATURES
+; PHILOSOPHY: ABSOLUTE SILICON ORDER - STRIPPED OF ALL OEM LEGACY BLOAT
+; ==============================================================================
+
 ; --- Core System Tables (Fixed for x86 Little-Endian Precision) ---
-ACPI_RSDP_SIGNATURE  equ 0x2052545020445352 ; "RSD PTR " (Corrected layout)
-ACPI_RSDT_SIGNATURE  equ 0x54445352         ; "TDSR" -> In Memory: "RSDT" V
+ACPI_RSDP_SIGNATURE  equ 0x2052545020445352 ; "RSD PTR " (Global Root Gateway)
 ACPI_XSDT_SIGNATURE  equ 0x54445358         ; "TDSX" -> In Memory: "XSDT" V
 ACPI_FADT_SIGNATURE  equ 0x50434146         ; "PCAF" -> In Memory: "FACP" V
-ACPI_DSDT_SIGNATURE  equ 0x54445344         ; "TDSD" -> In Memory: "DSDT" V
-ACPI_SSDT_SIGNATURE  equ 0x54445353         ; "TDSS" -> In Memory: "SSDT" 
 ACPI_FACS_SIGNATURE  equ 0x53434146         ; "SCAF" -> In Memory: "FACS" V
+ACPI_DSDT_SIGNATURE  equ 0x54445344         ; "TDSD" -> In Memory: "DSDT" V
 
-; --- Processor & Topology (Global Tables) ---
-ACPI_MADT_SIGNATURE  equ 0x43495041         ; "CIPA" -> In Memory: "APIC"
-ACPI_SRAT_SIGNATURE  equ 0x54415253         ; "TARS" -> In Memory: "SRAT"
-ACPI_SLIT_SIGNATURE  equ 0x54494C53         ; "TILS" -> In Memory: "SLIT"
-ACPI_PPTT_SIGNATURE  equ 0x54545050         ; "TTPP" -> In Memory: "PPTT"
-ACPI_MPST_SIGNATURE  equ 0x5453504D         ; "TSPM" -> In Memory: "MPST"
-ACPI_CDAT_SIGNATURE  equ 0x54414443         ; "TADC" -> In Memory: "CDAT"
+; --- Essential Hardware Topology Extensions (The Absolute Enforcers) ---
+ACPI_MADT_SIGNATURE  equ 0x43495041         ; "APIC" -> In Memory: "MADT" (Core Allocation) V
+ACPI_MCFG_SIGNATURE  equ 0x4746434D         ; "M_C_F_G" -> In Memory: "MCFG" (PCIe Base Matrix) V
 
-; --- Security & Hardware Enforcement (The Combat Zone) ---
-ACPI_TPM2_SIGNATURE  equ 0x324D5054         ; "2MPT" -> In Memory: "TPM2"
-ACPI_TCPA_SIGNATURE  equ 0x41504354         ; "APCT" -> In Memory: "TCPA"
-ACPI_WPBT_SIGNATURE  equ 0x54425057         ; "TBPW" -> In Memory: "WPBT" (Bloatware/Rootkit vector!)
-ACPI_WSMT_SIGNATURE  equ 0x544D5357         ; "TMSW" -> In Memory: "WSMT" (SMM Mitigations)
-ACPI_SPCR_SIGNATURE  equ 0x52435053         ; "RCPS" -> In Memory: "SPCR"
-ACPI_BGRT_SIGNATURE  equ 0x54524742         ; "TRGB" -> In Memory: "BGRT"
-ACPI_SDEV_SIGNATURE  equ 0x56454453         ; "VEDS" -> In Memory: "SDEV"
-
-; --- Shared Virtualization Infrastructure ---
-ACPI_NFIT_SIGNATURE  equ 0x5449464E         ; "TIFN" -> In Memory: "NFIT"
-ACPI_PCCT_SIGNATURE  equ 0x54434350         ; "TCCP" -> In Memory: "PCCT"
-
-; --- Timers & Subsystems ---
-ACPI_HPET_SIGNATURE  equ 0x54455048         ; "TEPH" -> In Memory: "HPET"
-ACPI_MCFG_SIGNATURE  equ 0x4746434D         ; "GFCM" -> In Memory: "MCFG"
-ACPI_ECDT_SIGNATURE  equ 0x54444345         ; "TDCE" -> In Memory: "ECDT"
-ACPI_SBST_SIGNATURE  equ 0x54534253         ; "TSBS" -> In Memory: "SBST"
-ACPI_BOOT_SIGNATURE  equ 0x544F4F42         ; "TOOB" -> In Memory: "BOOT"
-ACPI_DBGP_SIGNATURE  equ 0x50474244         ; "PGBD" -> In Memory: "DBGP"
-ACPI_DBG2_SIGNATURE  equ 0x32474244         ; "2GBD" -> In Memory: "DBG2"
-
-; --- Vendor Specific & Extensions ---
-ACPI_BERT_SIGNATURE  equ 0x54524542         ; "TREB" -> In Memory: "BERT"
-ACPI_EINJ_SIGNATURE  equ 0x4A4E4945         ; "JNIE" -> In Memory: "EINJ"
-ACPI_ERST_SIGNATURE  equ 0x54535245         ; "TSRE" -> In Memory: "ERST"
-ACPI_HEST_SIGNATURE  equ 0x54534548         ; "TSEH" -> In Memory: "HEST"
-ACPI_HMAT_SIGNATURE  equ 0x54414448         ; "TADH" -> In Memory: "HMAT"
-ACPI_VIOT_SIGNATURE  equ 0x544F4956         ; "TOIV" -> In Memory: "VIOT"
-ACPI_PHAT_SIGNATURE  equ 0x54414850         ; "TAHP" -> In Memory: "PHAT"
-
-; --- Storage, Network & Boot ---
-ACPI_IBFT_SIGNATURE  equ 0x54464269         ; "TFBi" -> In Memory: "iBFT"
-ACPI_NBFT_SIGNATURE  equ 0x5446424E         ; "TFBN" -> In Memory: "NBFT"
-ACPI_SATA_SIGNATURE  equ 0x41544153         ; "ATAS" -> In Memory: "SATA"
-ACPI_MCHI_SIGNATURE  equ 0x4948434D         ; "IHCM" -> In Memory: "MCHI"
-ACPI_UEFI_SIGNATURE  equ 0x49464555         ; "IFEU" -> In Memory: "UEFI"
-
-; --- Advanced Processing & Fabric ---
-ACPI_CPEP_SIGNATURE  equ 0x50455043         ; "PEPC" -> In Memory: "CPEP"
-ACPI_GTDT_SIGNATURE  equ 0x54444447         ; "TDDG" -> In Memory: "GTDT"
-ACPI_MPAM_SIGNATURE  equ 0x4D41504D         ; "MAPM" -> In Memory: "MPAM"
-ACPI_AEST_SIGNATURE  equ 0x54534541         ; "TSEA" -> In Memory: "AEST"
-ACPI_AGDI_SIGNATURE  equ 0x49444741         ; "IDGA" -> In Memory: "AGDI"
-
-; --- Confidential Computing, Power & Enterprise ---
-ACPI_SVKL_SIGNATURE  equ 0x4C4B5653         ; "LKVS" -> In Memory: "SVKL"
-ACPI_CCEL_SIGNATURE  equ 0x4C454343         ; "LECC" -> In Memory: "CCEL"
-ACPI_DRTM_SIGNATURE  equ 0x4D545244         ; "MTRD" -> In Memory: "DRTM"
-ACPI_MSDM_SIGNATURE  equ 0x4D44534D         ; "MDSM" -> In Memory: "MSDM"
-ACPI_SLIC_SIGNATURE  equ 0x43494C53         ; "CILS" -> In Memory: "SLIC"
-ACPI_WDAT_SIGNATURE  equ 0x54414457         ; "TADW" -> In Memory: "WDAT"
-ACPI_WDDT_SIGNATURE  equ 0x54444457         ; "TDDW" -> In Memory: "WDDT"
-ACPI_WDRT_SIGNATURE  equ 0x54524457         ; "TRDW" -> In Memory: "WDRT"
-ACPI_FPDT_SIGNATURE  equ 0x54445046         ; "TDPF" -> In Memory: "FPDT"
-
-; --- Compute Express Link (CXL) & Legacy Hardware ---
-ACPI_CEDT_SIGNATURE  equ 0x54444543         ; "TDEC" -> In Memory: "CEDT"
-ACPI_CSRT_SIGNATURE  equ 0x54525343         ; "TRSC" -> In Memory: "CSRT"
-ACPI_PRMT_SIGNATURE  equ 0x544D5250         ; "TMRP" -> In Memory: "PRMT"
-ACPI_SPMI_SIGNATURE  equ 0x494D5053         ; "IMPS" -> In Memory: "SPMI"
-ACPI_WAET_SIGNATURE  equ 0x54454157         ; "TEAW" -> In Memory: "WAET"
-
-;==================================================================================
-;				   NESTED SHADOW & CLOUD HYPERVISOR TABLES
-;==================================================================================
-ACPI_XENV_SIGNATURE  equ 0x564E4558         ; "V NEX" -> In Memory: "XENV"
-ACPI_WAFT_SIGNATURE  equ 0x54464157         ; "TFAW" -> In Memory: "WAFT"
-ACPI_AWS_SIGNATURE   equ 0x5F535741         ; "_SWA" -> In Memory: "AWS_"
-ACPI_QEMU_SIGNATURE  equ 0x554D4551         ; "UMEQ" -> In Memory: "QEMU"
-
-static_rsdp_block  equ 0x0002F000         ; Hardcoded secure RAM address for our pristine RSDP (Aligned to 16 bytes)
+static_rsdp_block    equ 0x00030000         ; Hardcoded secure RAM address for our pristine RSDP (Aligned to 16 bytes)
 
 
 
@@ -2921,105 +2856,98 @@ static_rsdp_block  equ 0x0002F000         ; Hardcoded secure RAM address for our
 ;so no one gonna have any black box at checking and all of you can learn wish me goodluck it is going to be hard one Im one person
 ;If someone can check my hypervisor and In Out when everything gonna be I will thank you a lot. lets start are game:
 
-
+;explanation for what is ACPI: 
+;ACPI is just a map that helping to understand how much Cores we have and about the architecture of the PC thats it
 
 ;==================================================================================
 ;                           Core System Tables 
 ;==================================================================================
-acpi_three_strike_radar_entry:
-    mov rdx, 3                              
+    ; --------------------------------------------------------------------------
+    ; UNLOCK SHADOW RAM: Force Read/Write permission over the 0xE0000-0xFFFFF zone
+    ; --------------------------------------------------------------------------
+    mov ecx, 0x00000258         ; MSR_MTRRfix16k_80000: Manages lower system memory attributes
+    rdmsr                       ; Fetch current cache properties into EDX:EAX
+    or eax, 0x11111111          ; Enable Read/Write modifications for legacy compatibility space
+    wrmsr                       ; Commit layout directly back to the physical silicon core
 
+    ; On the Shadow RAM we are going to override the ACPI baseline to prevent firmware manipulation.
+    ; Legacy BIOS mapping leaves this region write-protected post-boot; this MSR override restores access.
+
+Start_Delete:                   ; Anchor tag marking the beginning of the runtime shielder sequence
+acpi_three_strike_radar_entry:  ; Anti-ROP framework: Triggers a zero-wipe cascade over this entire block post-execution
+    mov rdx, 3                  ; Set strike counter for radar scan attempts
+    xor r8, r8                  ; Sanitize R8 to eliminate residual register leakage or side-channel snooping
+    xor r9, r9                  ; Sanitize R9 to mitigate microarchitectural voltage and transient profiling attacks
 .initiate_radar_pass:
-    mov rsi, 0x000E0000                     ; Set base pointer to the hardcoded EBDA region (0x000E0000)
-    mov rdi, ACPI_RSDP_SIGNATURE            ; Load the reversed "RSD PTR " signature from our global matrix
-    mov rcx, 0x00020000                     ; Scan volume boundary: 128KB (0xE0000 to 0x100000)
+    mov rsi, 0x000E0000         ; Base pointer referencing the physical EBDA region (0x000E0000)
+    mov rdi, ACPI_RSDP_SIGNATURE ; Load target "RSD PTR " signature constant from the core matrix
+    mov rcx, 0x00020000         ; Set strict memory scan volume boundary to 128KB (0xE0000 to 0x100000)
 
 .scan_iteration_stream:
-    mov rax, [rsi]                          ; Atomic read: fetch 8 bytes directly from the silicon plane
-    cmp rax, rdi                            ; Check if the motherboard creators RSDP is matched
-    je .target_isolated_hijack              ; Match found! Break out immediately to execute the hijack
+    mov rax, [rsi]              ; Atomic execution: fetch 8 bytes directly from the hardware memory plane
+    cmp rax, rdi                ; Check if the current block matches the manufacturer RSDP signature
+    je .target_isolated_hijack  ; Signature match isolated! Route directly to the redirection matrix
     
-    add rsi, 16                             ; Maintain strict 16-byte CPU instruction alignment
-    sub rcx, 16                             ; Decrement memory tracking index
-    ja .scan_iteration_stream               ; Continue searching this specific pass zone
+    add rsi, 16                 ; Maintain strict 16-byte instruction boundary alignment
+    sub rcx, 16                 ; Decrement remaining scan tracking index
+    ja .scan_iteration_stream   ; Continue loop if memory boundary has not been exhausted
+    
+    cmp r8, 1                   ; Sanity check: Evaluate dynamic register state
+    je r9                       ; Dynamic execution branch (Note: ensure R9 holds a valid label address before execution)
 
-    ; --- Strike Handling: Execution falls here if current pass failed ---
-    dec rdx                                 ; Drop the strike counter
-    cmp rdx, 0                              ; Check if all 3 passes failed down to the bone
-    je .force_absolute_triple_fault         ; If strikes hit 0, escalate to complete motherboard annihilation
-    jmp .initiate_radar_pass                ; If strikes remain, jump BACK to initiate the next pass zone
+    ; --- Strike Handling: Executed if the current radar pass fails to locate the signature ---
+    dec rdx                     ; Decrement the remaining radar pass strikes
+    cmp rdx, 0                  ; Check if all 3 passes failed down to the bone
+    je .force_absolute_triple_fault ; Escalation matrix: Trigger absolute hardware breakdown if strikes hit zero
+    jmp .initiate_radar_pass    ; Re-arm and loop back for subsequent verification pass
 
+align 16
 .target_isolated_hijack:
     ; ==========================================================================
     ; EXECUTE DIRECT PHYSICAL HIJACKING OVER THE DISCOVERED LEGACY SIGNATURE
     ; ==========================================================================
-    mov rdi, rsi
-    mov rsi, static_rsdp_block
-    movsq                                   ; Overwrite Signature
-    movsq                                   ; Overwrite Checksum & OEM ID
-    movsq                                   ; Overwrite Revision & Legacy Ptr
-    movsq                                   ; Overwrite Length & XSDT Address
-    movsd                                   ; Overwrite Extended Checksum (36 bytes sealed)
+    ;That is already the RSDP so what I did before was bullshit so that is the best one of ACPI:
+    ;it is still on progress so if you want check it but dont learn from it until I finish 
 
-.unaligned_hardware_fallthrough:
-    ; The radar pass has succeeded. Transitioning into the primary forging matrix.
-    jmp forge_primary_acpi_lighthouses
+    mov rdi, rsi                ; Load discovered signature memory offset into destination index
+    mov rbp, rdi                ; Anchor RSDP base mapping into RBP frame pointer for structural tracking
+    mov rsi, static_rsdp_block  ; Point source index to our secure host-forged RSDP buffer block
+    movsq                       ; Atomically overwrite Signature block                          q = 8 bytes
+    movsq                       ; Atomically overwrite Checksum & OEM ID configurations         q = 8 bytes
+    movsq                       ; Atomically overwrite Revision & Legacy Pointer layouts        q = 8 bytes
+    movsq                       ; Atomically overwrite Length & XSDT Address lines              q = 8 bytes
+    movsd                       ; Overwrite Extended Checksum fields (36 bytes securely sealed) d = 4 bytes (DoubleWord)
 
-; ==============================================================================
-; HYPERVISOR PURE ASSEMBLY MANIFESTO - PRIMARY ACPI TABLES FORGING
-; ==============================================================================
-align 16
-forge_primary_acpi_lighthouses:
-    ; --------------------------------------------------------------------------
-    ; 1. FORGING THE SECURE RSDP (Root System Description Pointer) 
-    ; This block acts as the master trigger that blinds the Creators matrix.
-    ; --------------------------------------------------------------------------
-    mov rdi, static_rsdp_block              ; Point to our secure memory structure block
-    
-    ; Inject the Primary RSDP Signature ("RSD PTR ") using our master EQU constant
-    mov rax, ACPI_RSDP_SIGNATURE            ; 0x2052545020445352 -> "RSD PTR "
-    mov [rdi], rax                          ; Stamp directly into the first 8 bytes of silicon
-    
-    ; Populate the rest of the static RSDP context (ACPI 2.0+ specifications)
-    mov byte [rdi + 8], 0                   ; Base Checksum (Will be dynamically armed by Part 53)
-    mov dword [rdi + 9], "MSTR"             ; OEM ID string segment 1
-    mov word [rdi + 13], "64"               ; OEM ID string segment 2
-    mov byte [rdi + 15], 2                  ; Revision 2: Forces strict 64-bit architecture
-    mov dword [rdi + 16], 0x00000000        ; Legacy 32-bit RSDT address set to 0 (Choked!)
-    mov dword [rdi + 20], 36                ; Total length of the secure pointer layout
-    
-    ; --- The Core Redirection Line ---
-    ; We force the RSDP to point exclusively to our upcoming XSDT layout at 0x00030000
-    mov qword [rdi + 24], 0x0000000000030000 ; Extended 64-bit physical address pointer to XSDT
+; 64 bit gone he on 3 mov because every single one is 64 bit (RDI RSI) it is probably 36 bytes that mean 0x30024 that is the 
 
-    ; --------------------------------------------------------------------------
-    ; 2. FORGING THE SECURE XSDT (Extended System Description Table)
-    ; Located strictly at physical memory block 0x00030000.
-    ; --------------------------------------------------------------------------
-    mov rdi, 0x00030000                     ; Hardcoded physical location for our master XSDT
+; --------------------------------------------------------------------------
+; 1. FORGING THE SECURE XSDT (Extended System Description Table)
+; Located strictly at physical memory block 0x00031000.
+; --------------------------------------------------------------------------
+XSDT_Start_Table_Address:    
+    mov rdi, 0x00031000         ; Enforce static physical destination anchor address for XSDT
     
-    ; Inject the XSDT Signature ("XSDT") using our master EQU constant
-    mov eax, ACPI_XSDT_SIGNATURE            ; 0x54445358 -> "XSDT" in Little-Endian
-    mov [rdi], eax                          ; Stamp directly into the active matrix
+    mov eax, ACPI_XSDT_SIGNATURE ; 0x54445358 -> Little-Endian "XSDT" signature token
+    mov dword [rdi], eax        ; Inject signature token directly into the target active page
     
-    ; Build the XSDT Header Framework
-    mov dword [rdi + 4], 44                 ; Total length: 36 bytes header + 8 bytes pointer to FADT
-    mov byte [rdi + 8], 1                   ; Table Revision 1
-    mov byte [rdi + 9], 0                   ; Checksum placeholder
-    mov dword [rdi + 10], "MSTR"            ; OEM ID
+    add r8, 1                   ; Armed state confirmation token
+    mov r9, XSDT_Table          ; Load global label address directly into R9 for dynamic gate
+    jmp .initiate_radar_pass    ; Re-entry loop: Verify radar pass state
+
+; Build the XSDT Header Framework
+XSDT_Table:                     ; Global label matching R9 return pointer
+    mov dword [rdi + 4], 44     ; Total length: 36 bytes table header + 8 bytes pointer extension
+    mov byte [rdi + 8], 1       ; Table Revision 1
+    mov byte [rdi + 9], 0       ; Checksum placeholder
+    mov dword [rdi + 10], "MSTR" ; OEM ID validation string
     mov word [rdi + 14], "64"
-    mov qword [rdi + 16], "HYPERV01"        ; OEM Table ID Configuration
-    mov dword [rdi + 24], 0x00000001        ; OEM Revision marker
-    mov dword [rdi + 28], "NASM"            ; Creator identifier [nasm.us]
-    mov dword [rdi + 32], 0x20261002        ; Date Anchor (2026-10-02) [anchor: 2026-10-02]
-
-    ; ==========================================================================
-    ; ARCHITECTURAL ISOLATION LINK: MAPPING THE PATH TO FADT
-    ; ==========================================================================
-    ; Entry 0 of the XSDT pointer matrix points strictly to our secure FADT block
-    ; which will be forged at physical location 0x00031000.
-    ; --------------------------------------------------------------------------
-    mov qword [rdi + 36], 0x0000000000031000 ; Inject absolute 64-bit pointer to FADT
+    mov qword [rdi + 16], "HYPERV01" ; Define custom OEM Table ID configuration layout
+    mov dword [rdi + 24], 1     ; Set Creator OEM Revision index constant
+    mov dword [rdi + 28], "NASM" ; Compiler signature token
+    mov dword [rdi + 32], 0x20261002 ; Global synchronization date time anchor (2026-10-02)
+    
+    ; Entry 0 of the XSDT pointer matrix maps strictly to our secure FADT block at 0x32000
+    mov qword [rdi + 36], 0x0000000000032000 
 
 align 16
 acpi_fadt_core_compilation:
@@ -3212,99 +3140,108 @@ forge_secure_ssdt_bytecode:
     
     ; Zero padding matrix to perfectly align the table termination line
     mov dword [rdi + 13], 0x00000000
-;==========================================================================
-;                        Processor & Topology
-;==========================================================================
+    align 16
 
-_fortress_part_56_topology_forge:
+
+
+acpi_madt_core_compilation:
     ; --------------------------------------------------------------------------
-    ; STEP A: Initializing Base Pointers inside our Sovereign XSDT Matrix
-    ; RDI is assumed to point to our master XSDT Table Array (Offset allocation)
+    ; Execute direct physical forging of the Multiple APIC Description Table (MADT).
+    ; Core processor and hardware topology parameters are permanently locked at 0x00034000.
+    ; Dynamically scales core allocation entries using the active counter in register R15.
     ; --------------------------------------------------------------------------
-    mov rdi, 0x00030000         ; Base of our XSDT Table
+    mov rdi, 0x00034000                     ; Establish physical destination pointer [intel.com, vt01.com]
     
-    ; --------------------------------------------------------------------------
-    ; STEP B: Forging ACPI_MADT (Multiple APIC Description Table)
-    ; Purpose: Controls Core topology, APIC IDs, and Interrupt Routing
-    ; --------------------------------------------------------------------------
-    mov rax, 0x00035000         ; Hardcoded Physical Address for MADT
-    mov [rdi + 68], rax         ; Register pointer in XSDT Array
+    ; Inject the master MADT signature ("APIC") from your primary EQU tables
+    mov dword [rdi], ACPI_MADT_SIGNATURE    ; 0x43495041 -> "APIC" in hardware Little-Endian [intel.com]
+    mov dword [rdi + 4], 44                 ; Length placeholder (Header base length = 44 bytes) [intel.com]
+    mov byte  [rdi + 8], 1                  ; Revision 1 [intel.com]
+    mov byte  [rdi + 9], 0                  ; Checksum byte - dynamically armed by Part 53 engine
     
-    mov rsi, rax
-    mov ecx, 0x43495041         ; Signature: "APIC" (ACPI_MADT_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 64     ; Static Length for Header + Base Local APIC
-    mov dword [rsi + 36], 0xFEE00000 ; Force Local APIC Base Address to standard silicon location
-    mov dword [rsi + 40], 1     ; PCAT_COMPAT Flag Enabled
+    ; --- Injecting OEM Structural Identifiers ---
+    mov dword [rdi + 10], "MSTR"            ; OEM ID [intel.com]
+    mov word  [rdi + 14], "64"               
+    mov qword [rdi + 16], "MADTMSTR"        ; OEM Table ID Configuration [intel.com]
+    mov dword [rdi + 24], 0x00000001        ; OEM Revision marker
+    mov dword [rdi + 28], "NASM"            ; Creator identifier [intel.com]
+    mov dword [rdi + 32], 0x20261002        ; Time Anchor (2026-10-02)
 
-    ; --------------------------------------------------------------------------
-    ; STEP C: Forging ACPI_SRAT (System Resource Affinity Table)
-    ; Purpose: Dictates NUMA domains (Memory & CPU Affinity) to bind the Guest
-    ; --------------------------------------------------------------------------
-    mov rax, 0x00036000         ; Hardcoded Physical Address for SRAT
-    mov [rdi + 76], rax         ; Register pointer in XSDT Array
+    ; Local APIC Physical Address Base for standard x86 architecture (Typically 0xFEE00000)
+    mov dword [rdi + 36], 0xFEE00000        ; Local APIC Base Address [intel.com]
+    mov dword [rdi + 40], 1                 ; APIC Flags (Bit 0 = 1: PC-AT Compatible layout) [intel.com]
+
+    ; ==========================================================================
+    ; THE CORE ISOLATION LOOP: GENERATING LOCAL APIC STRUCTURES VIA R15 STATUS
+    ; ==========================================================================
+    add rdi, 44                             ; Advance RDI past the 44-byte header zone [intel.com]
+    xor rbx, rbx                            ; RBX = Current Core ID Allocation Index (0 to R15 - 1) [vt01.com]
+    mov rcx, r15                            ; RCX = Loop iterations tied strictly to active hardware cores [vt01.com]
+
+.topology_generation_loop:
+    cmp rcx, 0                              ; Check if all discovered cores are fully mapped
+    je .finalize_madt_size_patch
     
-    mov rsi, rax
-    mov ecx, 0x54415253         ; Signature: "SRAT" (ACPI_SRAT_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 48     ; Header length
-    mov dword [rsi + 36], 1     ; Table Revision (64-bit Affinity Support)
-    ; Remaining static resource blocks are left zeroed out to force a single NUMA domain
-
-    ; --------------------------------------------------------------------------
-    ; STEP D: Forging ACPI_SLIT (System Locality Distance Information Table)
-    ; Purpose: Freezes the matrix of memory latencies between NUMA nodes
-    ; --------------------------------------------------------------------------
-    mov rax, 0x00037000         ; Hardcoded Physical Address for SLIT
-    mov [rdi + 84], rax         ; Register pointer in XSDT Array
+    ; Constructing a strict 8-byte Processor Local APIC Structure (Type 0)
+    mov byte  [rdi], 0                      ; Structure Type 0: Processor Local APIC Descriptor [intel.com]
+    mov byte  [rdi + 1], 8                  ; Total length of this entry block (8 bytes) [intel.com]
+    mov byte  [rdi + 2], bl                 ; ACPI Processor ID allocation [intel.com]
+    mov byte  [rdi + 3], bl                 ; Hardware Local APIC ID mapping [intel.com]
+    mov dword [rdi + 4], 1                  ; Flags: Bit 0 = 1 (Core physically Enabled / Active) [intel.com]
     
-    mov rsi, rax
-    mov ecx, 0x54494C53         ; Signature: "SLIT" (ACPI_SLIT_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 44     ; Header length + 1 Entry Matrix
-    mov qword [rsi + 36], 1     ; Total Number of Localities = 1 (Static Monolithic Domain)
+    add rdi, 8                              ; Advance pointer by 8-byte limits to layout next entry [intel.com]
+    inc rbx                                 ; Step the core indexing counter
+    dec rcx                                 ; Decrement core allocation loop matrix
+    jmp .topology_generation_loop
 
+.finalize_madt_size_patch:
+    mov rsi, 0x00034000                     ; Point back to MADT table base [intel.com]
+    mov rax, rdi
+    sub rax, rsi                            ; RAX = Total computed physical table size in bytes
+    mov [rsi + 4], eax                      ; Patch absolute length back into Header Offset 4 [intel.com]
+
+align 16
+acpi_mcfg_core_compilation:
     ; --------------------------------------------------------------------------
-    ; STEP E: Forging ACPI_PPTT (Processor Properties Topology Table)
-    ; Purpose: Describes CPU Cache hierarchy (L1/L2/L3) to isolate side-channel attacks
+    ; Execute direct physical forging of the PCI Express Memory Mapped Configuration Table (MCFG).
+    ; Base configuration access boundaries are sealed permanently at 0x00039000.
     ; --------------------------------------------------------------------------
-    mov rax, 0x00038000         ; Hardcoded Physical Address for PPTT
-    mov [rdi + 92], rax         ; Register pointer in XSDT Array
+    mov rdi, 0x00039000                     ; Establish destination pointer [intel.com, vt01.com]
     
-    mov rsi, rax
-    mov ecx, 0x54545050         ; Signature: "PPTT" (ACPI_PPTT_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 36     ; Header length (No untrusted sub-structures allowed)
-    mov dword [rsi + 36], 0     ; Revision 0 - Completely flat topology representation
-
-    ; --------------------------------------------------------------------------
-    ; STEP F: Forging ACPI_MPST (Memory Power State Table)
-    ; Purpose: Overrides energy states of memory modules to block power attacks
-    ; --------------------------------------------------------------------------
-    mov rax, 0x00039000         ; Hardcoded Physical Address for MPST
-    mov [rdi + 100], rax        ; Register pointer in XSDT Array
+    ; Inject the master MCFG signature ("MCFG") from your primary EQU tables
+    mov dword [rdi], ACPI_MCFG_SIGNATURE    ; 0x4746434D -> "MCFG" in hardware Little-Endian [intel.com]
+    mov dword [rdi + 4], 60                 ; Length: 36 bytes header + 24 bytes allocation structure = 60 [intel.com]
+    mov byte  [rdi + 8], 1                  ; Revision 1 [intel.com]
+    mov byte  [rdi + 9], 0                  ; Checksum byte - calculated by Part 53 loop
     
-    mov rsi, rax
-    mov ecx, 0x5453504M         ; Signature: "MPST" (ACPI_MPST_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 40     ; Header length
-    ; Leaving power states configuration at 0 enforces static high-performance mode
-
-    ; --------------------------------------------------------------------------
-    ; STEP G: Forging ACPI_CDAT (Coherent Device Attribute Table)
-    ; Purpose: Defines routing attributes for Compute Express Link (CXL) fabric
-    ; --------------------------------------------------------------------------
-    mov rax, 0x0003A000         ; Hardcoded Physical Address for CDAT
-    mov [rdi + 108], rax        ; Register pointer in XSDT Array
+    ; --- Injecting OEM Structural Identifiers ---
+    mov dword [rdi + 10], "MSTR"            ; OEM ID [intel.com]
+    mov word  [rdi + 14], "64"               
+    mov qword [rdi + 16], "MCFGMSTR"        ; OEM Table ID Configuration [intel.com]
+    mov dword [rdi + 24], 0x00000001        ; OEM Revision marker
+    mov dword [rdi + 28], "NASM"            ; Creator identifier [intel.com]
+    mov dword [rdi + 32], 0x20261002        ; Time Anchor (2026-10-02)
     
-    mov rsi, rax
-    mov ecx, 0x54414443         ; Signature: "CDAT" (ACPI_CDAT_SIGNATURE)
-    mov [rsi], ecx
-    mov dword [rsi + 4], 36     ; Header length (Emptied to declare zero coherent external fabric)
+    mov qword [rdi + 36], 0                 ; Reserved space allocation (64-bit alignment) [intel.com]
+    
+    ; --- PCI Express Base Address Allocation Structure Mapping ---
+    mov qword [rdi + 44], 0xE0000000        ; Base Address: Pointer to the physical PCIe MMIO range [intel.com]
+    mov word  [rdi + 52], 0                 ; PCI Segment Group Number 0 [intel.com]
+    mov byte  [rdi + 54], 0                 ; Start Bus Number (Bus 0) [intel.com]
+    mov byte  [rdi + 55], 255               ; End Bus Number (Bus 255) [intel.com]
+    mov dword [rdi + 60], 0                 ; Reserved bits to seal the 60-byte boundary [intel.com]
+
+_fortress_acpi_core_sealed:
+    ; The entire sovereign ACPI Core Matrix is now compiled and locked in memory.
+    nop
 
 
 
 
+
+
+
+
+;Core System Tables 
     ;RSDP build Verified 
     ;XSDT build Verified
     ;FADT build Verified
@@ -3312,8 +3249,25 @@ _fortress_part_56_topology_forge:
     ;FACS build Verified
     ;DSDT build Verified
     ;ssdt build Verified
-    ;
+    ;MADT build Verified
+    ;MCFG build Verified
 
+    mov ecx, 0x00000258         ; Target fixed-range MTRR register managing physical 80000h–9FFFFh space
+    rdmsr                       ; Read the current architectural state of the memory typing matrix
+    
+    ; --- Force Read-Only Attributes & Enforce Shadow RAM Lockdown ---
+    ; We overwrite the data frames completely to drop write permissions system-wide.
+    ; Setting memory type byte patterns to 0x1A (Read-Only validation rules).
+    mov eax, 0x1A1A1A1A         ; Overwrite lower 32-bits: Hard-lock blocks 0 to 3 to absolute Read-Only mapping
+    mov edx, 0x1A1A1A1A         ; Overwrite upper 32-bits: Hard-lock blocks 4 to 7 to eliminate memory writing variables
+    
+    wrmsr                       ; Inject the secure lockdown matrix directly back into the silicon core
+                                ; we closing the Shadow RAM where is the MotherBoard and ACPI so we will not get any injection into there 
+        
+
+end_delete:                                 ; there we gonna delete everything so there not going to be ROP bussness or something
+                                            ; and because of the shadow RAM I dont want the hackers use it to open it again so Im going to delete it also
+    mov edi, Start_Delete
 
 
 ; =================================================================================
@@ -3679,6 +3633,8 @@ VM_Exit_Handler:
     pop rax
     
     mov rsp, rbp                ; Restore original RSP boundary alignment instantly
+    WBINVD                      ; to clean every single info from the L1 data cache so there not gonna be info leaking
+    INVVPID                     ; to clean the TLB so there not gonna be leaking more info from that and can map my entire hypervisor
     jmp Launch_VM               ; Resume Guest execution seamlessly (Time frozen, system locked)
 
     ; -------------------------------------------------------------
