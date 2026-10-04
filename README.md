@@ -2891,9 +2891,6 @@ acpi_three_strike_radar_entry:  ; Anti-ROP framework: Triggers a zero-wipe casca
     add rsi, 16                 ; Maintain strict 16-byte instruction boundary alignment
     sub rcx, 16                 ; Decrement remaining scan tracking index
     ja .scan_iteration_stream   ; Continue loop if memory boundary has not been exhausted
-    
-    cmp r8, 1                   ; Sanity check: Evaluate dynamic register state
-    je r9                       ; Dynamic execution branch (Note: ensure R9 holds a valid label address before execution)
 
     ; --- Strike Handling: Executed if the current radar pass fails to locate the signature ---
     dec rdx                     ; Decrement the remaining radar pass strikes
@@ -2910,16 +2907,15 @@ align 16
     ;it is still on progress so if you want check it but dont learn from it until I finish 
 
     mov rdi, rsi                ; Load discovered signature memory offset into destination index
-    mov rbp, rdi                ; Anchor RSDP base mapping into RBP frame pointer for structural tracking
+    mov r8, rdi                ; Anchor RSDP base mapping into RBP frame pointer for structural tracking
     mov rsi, static_rsdp_block  ; Point source index to our secure host-forged RSDP buffer block
     movsq                       ; Atomically overwrite Signature block                          q = 8 bytes
     movsq                       ; Atomically overwrite Checksum & OEM ID configurations         q = 8 bytes
     movsq                       ; Atomically overwrite Revision & Legacy Pointer layouts        q = 8 bytes
     movsq                       ; Atomically overwrite Length & XSDT Address lines              q = 8 bytes
     movsd                       ; Overwrite Extended Checksum fields (36 bytes securely sealed) d = 4 bytes (DoubleWord)
-
-; 64 bit gone he on 3 mov because every single one is 64 bit (RDI RSI) it is probably 36 bytes that mean 0x30024 that is the 
-
+    ;25 - 32 they got the address XSDT we need him to get the real information
+    mov rbp, [0x30000 + 0x19] ; 0x09 = 9 and 0x10 = 16 so 0x19 = 25
 ; --------------------------------------------------------------------------
 ; 1. FORGING THE SECURE XSDT (Extended System Description Table)
 ; Located strictly at physical memory block 0x00031000.
@@ -2928,26 +2924,26 @@ XSDT_Start_Table_Address:
     mov rdi, 0x00031000         ; Enforce static physical destination anchor address for XSDT
     
     mov eax, ACPI_XSDT_SIGNATURE ; 0x54445358 -> Little-Endian "XSDT" signature token
-    mov dword [rdi], eax        ; Inject signature token directly into the target active page
-    
-    add r8, 1                   ; Armed state confirmation token
-    mov r9, XSDT_Table          ; Load global label address directly into R9 for dynamic gate
-    jmp .initiate_radar_pass    ; Re-entry loop: Verify radar pass state
+    mov dword [rdi], eax        ; Inject signature token directly into the target active page 0-3 bytes
 
 ; Build the XSDT Header Framework
-XSDT_Table:                     ; Global label matching R9 return pointer
-    mov dword [rdi + 4], 44     ; Total length: 36 bytes table header + 8 bytes pointer extension
-    mov byte [rdi + 8], 1       ; Table Revision 1
-    mov byte [rdi + 9], 0       ; Checksum placeholder
-    mov dword [rdi + 10], "MSTR" ; OEM ID validation string
-    mov word [rdi + 14], "64"
-    mov qword [rdi + 16], "HYPERV01" ; Define custom OEM Table ID configuration layout
-    mov dword [rdi + 24], 1     ; Set Creator OEM Revision index constant
-    mov dword [rdi + 28], "NASM" ; Compiler signature token
-    mov dword [rdi + 32], 0x20261002 ; Global synchronization date time anchor (2026-10-02)
+XSDT_Table:                          ; Global label matching R9 return pointer
+    mov dword [rdi + 4], [rbp + 4]   ; Total length: 36 bytes table header + 8 bytes pointer extension
+    mov byte  [rdi + 8], [rbp + 8]   ; Table Revision 1
+    mov byte  [rdi + 9], [rbp + 9]   ; Checksum placeholder
+    mov dword [rdi + 10],[rbp + 10]  ; OEM ID validation string
+    mov word  [rdi + 14],[rbp + 14]  
+    mov qword [rdi + 16],[rbp + 16]  ; Define custom OEM Table ID configuration layout
+    mov dword [rdi + 24],[rbp + 24]  ; Set Creator OEM Revision index constant
+    mov dword [rdi + 28],[rbp + 28]  ; Compiler signature token "NASM"
+    mov dword [rdi + 32],[rbp + 32]  ; Global synchronization date time anchor (2026-10-02)
     
     ; Entry 0 of the XSDT pointer matrix maps strictly to our secure FADT block at 0x32000
     mov qword [rdi + 36], 0x0000000000032000 
+    mov r8, [rbp + 36]                      ; Im just taking the FADT of that block from XSDT
+    mov rbp, r8                             ; I dont want to lose more bytes 
+
+    ; you need to fix the XSDT what he take into him 
 
 align 16
 acpi_fadt_core_compilation:
@@ -2955,13 +2951,13 @@ acpi_fadt_core_compilation:
     ; Execute direct physical forging of the Fixed ACPI Description Table (FADT).
     ; Core parameters are locked permanently at physical address 0x00031000.
     ; --------------------------------------------------------------------------
-    mov rdi, 0x00031000                     ; Establish destination pointer
+    mov rdi, 0x00032000                     ; Establish destination pointer
     
     ; Inject the master FADT signature ("FACP") from your primary EQU tables
     mov dword [rdi], ACPI_FADT_SIGNATURE    ; 0x50434146 -> "FACP" in hardware Little-Endian 
     mov dword [rdi + 4], 244                ; Enforce strict structure length (ACPI 2.0+) 
-    mov byte [rdi + 8], 4                   ; Revision 4: Forces strict 64-bit address translation 
-    mov byte [rdi + 9], 0                   ; Checksum byte - dynamically calculated by Part 53 loop
+    mov byte  [rdi + 8], 4                  ; Revision 4: Forces strict 64-bit address translation 
+    mov byte  [rdi + 9], 0                  ; Checksum byte - dynamically calculated by Part 53 loop
     
     ; --- Injecting OEM Structural Identifiers ---
     mov dword [rdi + 10], "MSTR"            ; OEM ID 
